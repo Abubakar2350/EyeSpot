@@ -1,8 +1,8 @@
 """
-model_loader.py — YOLO model load karne wala code.
+model_loader.py — Loads the YOLO model.
 
-Yahan sirf ek kaam hota hai: weights load karna aur device (CPU/GPU) decide karna.
-Detection logic detect.py mein hai.
+This module does exactly two things: load the weights and decide which device
+to run on. The detection logic lives in detect.py.
 """
 
 from __future__ import annotations
@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 class ModelLoadError(RuntimeError):
-    """Model load na ho paaye to ye raise hoti hai (saaf error message ke sath)."""
+    """Raised, with an actionable message, when the model cannot be loaded."""
 
 
 def resolve_device(device: str | None = None) -> str:
     """
-    Konsa device use karna hai ye decide karo.
+    Decide which device to run inference on.
 
-    Agar user ne explicitly diya hai to wohi, warna auto-detect:
+    An explicit choice always wins; otherwise auto-detect in this order:
     CUDA (NVIDIA GPU) > MPS (Apple Silicon) > CPU.
     """
     if device:
@@ -31,7 +31,7 @@ def resolve_device(device: str | None = None) -> str:
 
     try:
         import torch
-    except ImportError:  # torch ke bagair ultralytics chal hi nahi sakta
+    except ImportError:  # ultralytics cannot run without torch anyway
         return "cpu"
 
     if torch.cuda.is_available():
@@ -43,11 +43,11 @@ def resolve_device(device: str | None = None) -> str:
 
 def _resolve_weights_path(model_name: str) -> str:
     """
-    Weights ka path nikalo.
+    Work out where the weights live.
 
-    - Agar user ne poora path diya hai (aur file mojood hai) to wohi use karo.
-    - Agar models/ folder mein pehle se downloaded copy hai to wo use karo.
-    - Warna sirf naam return karo — Ultralytics khud download kar lega.
+    - If the user gave a full path and the file exists, use it.
+    - If a previously downloaded copy sits in models/, use that.
+    - Otherwise return the bare name and let Ultralytics download it.
     """
     candidate = Path(model_name)
     if candidate.is_file():
@@ -62,17 +62,17 @@ def _resolve_weights_path(model_name: str) -> str:
 
 def load_model(model_name: str | None = None, device: str | None = None):
     """
-    YOLO model load kar ke return karo.
+    Load and return the YOLO model.
 
     Args:
-        model_name: e.g. "yolov8n.pt" ya koi custom .pt file ka path.
+        model_name: e.g. "yolov8n.pt", or a path to a custom .pt file.
         device: "cpu" / "cuda" / "mps" / None (auto).
 
     Returns:
-        (model, device) ka tuple.
+        A (model, device) tuple.
 
     Raises:
-        ModelLoadError: agar ultralytics installed na ho ya weights load na hon.
+        ModelLoadError: if ultralytics is missing or the weights fail to load.
     """
     model_name = model_name or config.MODEL_NAME
     device = resolve_device(device or config.DEVICE)
@@ -81,8 +81,8 @@ def load_model(model_name: str | None = None, device: str | None = None):
         from ultralytics import YOLO
     except ImportError as exc:
         raise ModelLoadError(
-            "Ultralytics installed nahi hai.\n"
-            "Install karein:  pip install -r requirements.txt"
+            "Ultralytics is not installed.\n"
+            "Install it with:  pip install -r requirements.txt"
         ) from exc
 
     weights = _resolve_weights_path(model_name)
@@ -92,11 +92,11 @@ def load_model(model_name: str | None = None, device: str | None = None):
     try:
         model = YOLO(weights)
         model.to(device)
-    except Exception as exc:  # network fail, corrupt weights, wrong path, etc.
+    except Exception as exc:  # network failure, corrupt weights, bad path, etc.
         raise ModelLoadError(
-            f"Model '{weights}' load nahi ho saka: {exc}\n"
-            "Pehli baar run kar rahe hain to internet connection check karein "
-            "(weights download hoti hain), ya --model se sahi path dein."
+            f"Could not load model '{weights}': {exc}\n"
+            "On a first run the weights are downloaded, so check your internet "
+            "connection — or pass a valid path with --model."
         ) from exc
 
     logger.info("Model ready. Classes: %d", len(model.names))
@@ -105,13 +105,13 @@ def load_model(model_name: str | None = None, device: str | None = None):
 
 def expand_class_groups(names: list[str]) -> list[str]:
     """
-    Group ke naam ko us ki classes mein khol do.
+    Expand group names into the classes they stand for.
 
         ["animals"]        -> ["bird", "cat", "dog", ...]
         ["person", "pets"] -> ["person", "cat", "dog", "bird"]
 
-    Jo naam group nahi hai wo waise ka waisa rehta hai. Duplicates hat jaate
-    hain lekin tarteeb wohi rehti hai jo user ne di.
+    Names that are not groups pass through unchanged. Duplicates are removed
+    while the user's original ordering is preserved.
     """
     expanded: list[str] = []
     for name in names:
@@ -129,11 +129,10 @@ def expand_class_groups(names: list[str]) -> list[str]:
 
 def class_name_to_id(model, names: list[str]) -> list[int]:
     """
-    Class ke naam (e.g. ["person", "car"]) ko YOLO ke class IDs mein badlo.
+    Convert class names (e.g. ["person", "car"]) into YOLO class IDs.
 
-    Group ke naam (e.g. "animals") pehle apni classes mein khul jaate hain.
-    Unknown naam par ValueError raise hoti hai taake user ko turant pata chale
-    ke usne typo kiya hai.
+    Group names (e.g. "animals") are expanded first. Unknown names raise a
+    ValueError so that typos surface immediately.
     """
     if not names:
         return []
@@ -156,7 +155,7 @@ def class_name_to_id(model, names: list[str]) -> list[int]:
         groups = ", ".join(sorted(config.CLASS_GROUPS))
         available = ", ".join(sorted(lookup))
         raise ValueError(
-            f"Ye class name(s) model mein mojood nahi: {unknown}\n"
+            f"Unknown class name(s): {unknown}\n"
             f"Groups: {groups}\n"
             f"Available classes: {available}"
         )

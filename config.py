@@ -1,8 +1,8 @@
 """
-config.py — Project ki saari default settings ek jagah.
+config.py — All default settings in one place.
 
-Yahan values change kar ke aap poore app ka behaviour badal sakte hain,
-bina detection code ko chhue. CLI flags (main.py) in defaults ko override karte hain.
+Change the values here to alter the application's behaviour without touching
+any detection code. CLI flags (see main.py) override these defaults.
 """
 
 from pathlib import Path
@@ -13,14 +13,14 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# Saved screenshots / videos / CSV logs yahan jaate hain
+# Saved screenshots, videos and CSV logs go here
 OUTPUT_DIR = BASE_DIR / "outputs"
 
-# Downloaded model weights yahan cache hote hain
+# Downloaded model weights are cached here
 MODELS_DIR = BASE_DIR / "models"
 
-# Saved camera profiles (naam -> stream URL). Ye file git mein NAHI jaati
-# kyunke is mein CCTV ke passwords hote hain — `cameras.example.json` template hai.
+# Saved camera profiles (name -> stream URL). This file is NOT committed to git
+# because it holds CCTV passwords; `cameras.example.json` is the template.
 CAMERAS_FILE = BASE_DIR / "cameras.json"
 
 
@@ -28,15 +28,15 @@ CAMERAS_FILE = BASE_DIR / "cameras.json"
 # Model settings
 # ---------------------------------------------------------------------------
 
-# yolov8n = nano (sabse fast, CPU friendly). Accuracy chahiye to:
-# "yolov8s.pt" (small) ya "yolov8m.pt" (medium). Pehli baar run par
-# Ultralytics ye weights khud download kar leta hai.
+# yolov8n = nano (fastest, CPU friendly). For better accuracy use
+# "yolov8s.pt" (small) or "yolov8m.pt" (medium). Ultralytics downloads the
+# weights automatically on first run.
 MODEL_NAME = "yolov8n.pt"
 
-# "cpu", "cuda", "mps" — ya None rakhein to auto-detect hoga
+# "cpu", "cuda", "mps" — or None to auto-detect
 DEVICE = None
 
-# Model ko is size par inference karta hai (chhota = tez, bara = accurate)
+# Inference resolution (smaller = faster, larger = more accurate)
 IMAGE_SIZE = 640
 
 
@@ -44,19 +44,18 @@ IMAGE_SIZE = 640
 # Detection settings
 # ---------------------------------------------------------------------------
 
-# Is se kam confidence wali detections discard ho jaayengi
+# Detections below this confidence are discarded
 CONFIDENCE_THRESHOLD = 0.5
 
-# Non-Max Suppression IoU threshold (overlapping boxes hatane ke liye)
+# Non-Max Suppression IoU threshold (removes overlapping boxes)
 IOU_THRESHOLD = 0.45
 
-# Sirf in classes ko detect karein, e.g. ["person", "car"].
-# Empty list ya None = saari 80 COCO classes.
+# Detect only these classes, e.g. ["person", "car"].
+# An empty list or None means all 80 COCO classes.
 CLASS_FILTER: list[str] = []
 
-# Class groups — "animal" naam ki koi ek COCO class nahi hoti, isliye aam
-# groups ke shortcuts bana diye hain. `--classes animals` likhein to ye
-# saari classes khud khul jaati hain.
+# Class groups — COCO has no single "animal" class, so these shortcuts expand
+# to the relevant classes. `--classes animals` pulls in the whole group.
 CLASS_GROUPS: dict[str, list[str]] = {
     "animals": [
         "bird", "cat", "dog", "horse", "sheep", "cow",
@@ -71,7 +70,7 @@ CLASS_GROUPS: dict[str, list[str]] = {
     "road": ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"],
 }
 
-# Ek frame mein max kitni detections rakhni hain
+# Maximum detections to keep in a single frame
 MAX_DETECTIONS = 300
 
 
@@ -79,24 +78,24 @@ MAX_DETECTIONS = 300
 # Input settings
 # ---------------------------------------------------------------------------
 
-# Default webcam index (0 = system ka pehla camera)
+# Default webcam index (0 = the system's first camera)
 CAMERA_INDEX = 0
 
-# Webcam se ye resolution maangte hain (camera support kare to milegi)
+# Resolution requested from the webcam (applied only if the camera supports it)
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
 # Network stream (phone camera / CCTV / RTSP) settings
 # ---------------------------------------------------------------------------
 
-# Stream toot jaye to kitni baar dobara connect karne ki koshish karein
+# How many times to retry when a stream drops
 STREAM_RECONNECT_ATTEMPTS = 5
 
-# Har koshish ke darmiyan kitne second rukein
+# Seconds to wait between reconnect attempts
 STREAM_RECONNECT_DELAY = 2.0
 
-# Network streams par buffer chhota rakhte hain warna latency barhti jaati hai
-# (frames queue mein jama ho jaate hain aur video "peechhe" reh jaati hai)
+# Keep the buffer small on network streams, otherwise latency grows steadily
+# (frames pile up in the queue and the video falls behind real time)
 STREAM_BUFFER_SIZE = 1
 
 
@@ -104,15 +103,15 @@ STREAM_BUFFER_SIZE = 1
 # Tracking settings
 # ---------------------------------------------------------------------------
 
-# "bytetrack.yaml" — tez, halka (default)
-# "botsort.yaml"  — thoda slow lekin behtar re-identification (target chhup ke
-#                    wapas aaye to usay pehchan leta hai)
+# "bytetrack.yaml" — fast and lightweight (default)
+# "botsort.yaml"  — slower but better at re-identification (recognises a target
+#                    that disappeared behind something and came back)
 TRACKER = "bytetrack.yaml"
 
-# Locked target ka raasta (trail) kitne frames tak dikhana hai
+# How many frames of the locked target's path (trail) to draw
 TRAIL_LENGTH = 64
 
-# Target itne frames tak na dikhe to "LOST" dikhana shuru karo
+# Show "LOST" once the target has been missing for this many frames
 TARGET_LOST_AFTER = 30
 
 
@@ -120,18 +119,18 @@ TARGET_LOST_AFTER = 30
 # UI / drawing settings
 # ---------------------------------------------------------------------------
 
-WINDOW_NAME = "YOLO Real-Time Detection"
+WINDOW_NAME = "EyeSpot — Real-Time Detection"
 
-# FPS ka moving average kitne frames par nikalna hai
+# Number of frames used for the FPS moving average
 FPS_SMOOTHING_WINDOW = 30
 
-# Overlay panel (FPS + object counts) dikhana hai ya nahi
+# Show the overlay panel (FPS + object counts)
 SHOW_OVERLAY = True
 
-# Box ke upar confidence % likhna hai ya nahi
+# Print the confidence percentage above each box
 SHOW_CONFIDENCE = True
 
-# Box ki line ki motai (pixels)
+# Bounding box line thickness in pixels
 BOX_THICKNESS = 2
 
 FONT_SCALE = 0.55
@@ -141,26 +140,26 @@ FONT_SCALE = 0.55
 # Output settings
 # ---------------------------------------------------------------------------
 
-# Detections ka CSV log banayein? (timestamp, object, confidence)
+# Write a CSV log of detections? (timestamp, object, confidence)
 ENABLE_CSV_LOG = False
 
-# Processed video save karne ka codec (mp4 ke liye "mp4v" sabse portable hai)
+# Codec used when saving processed video ("mp4v" is the most portable for mp4)
 VIDEO_CODEC = "mp4v"
 
-# Video file process karte waqt output FPS (None = source video ka FPS)
+# Output FPS when processing a video file (None = use the source video's FPS)
 OUTPUT_FPS = None
 
 
 # ---------------------------------------------------------------------------
-# Keyboard shortcuts (OpenCV window mein)
+# Keyboard shortcuts (in the OpenCV window)
 # ---------------------------------------------------------------------------
 
-KEY_QUIT = ("q", 27)        # 'q' ya Escape
-KEY_SCREENSHOT = ("s",)     # frame save karo
+KEY_QUIT = ("q", 27)        # 'q' or Escape
+KEY_SCREENSHOT = ("s",)     # save the current frame
 KEY_PAUSE = ("p", " ")      # pause / resume
 KEY_TOGGLE_OVERLAY = ("o",)
-KEY_CONF_UP = ("+", "=")    # confidence threshold barhao
-KEY_CONF_DOWN = ("-", "_")  # confidence threshold ghatao
+KEY_CONF_UP = ("+", "=")    # raise the confidence threshold
+KEY_CONF_DOWN = ("-", "_")  # lower the confidence threshold
 KEY_TOGGLE_TRACK = ("t",)   # tracking on/off
-KEY_LOCK_FIRST = ("l",)     # pehle/sabse aham object par lock karo
-KEY_CLEAR_LOCK = ("c",)     # lock hatao
+KEY_LOCK_FIRST = ("l",)     # lock onto the first/most prominent object
+KEY_CLEAR_LOCK = ("c",)     # clear the lock

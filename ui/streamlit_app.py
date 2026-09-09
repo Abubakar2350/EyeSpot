@@ -1,14 +1,14 @@
 """
-streamlit_app.py — Optional browser-based UI (PRD Phase 7).
+streamlit_app.py — Optional browser-based UI.
 
-Chalane ka tareeqa (project root se):
+Run it from the project root:
     streamlit run ui/streamlit_app.py
 
 Features:
-  - Image ya video file upload kar ke detection
-  - Local webcam par live detection (jis machine par app chal rahi hai)
-  - Confidence slider, class filter dropdown, model selector
-  - Result download karne ka button
+  - Detection on an uploaded image or video
+  - Live detection from a local webcam, a saved camera, or a network stream
+  - Confidence slider, class filter, model selector, tracking toggle
+  - Downloadable results (annotated video and CSV log)
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import cv2
 import numpy as np
 import streamlit as st
 
-# Project root ko import path mein daalein taake `config`/`detector` mil jayein
+# Put the project root on the import path so `config`/`detector` resolve
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -46,16 +46,16 @@ from utils.save_output import (  # noqa: E402
     transcode_for_browser,
 )
 
-st.set_page_config(page_title="YOLO Real-Time Detection", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="EyeSpot — Real-Time Detection", page_icon="🎯", layout="wide")
 
 MODEL_CHOICES = ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolo11n.pt", "yolo11s.pt"]
 
 
-@st.cache_resource(show_spinner="Model load ho raha hai...")
+@st.cache_resource(show_spinner="Loading model...")
 def get_detector(model_name: str, device: str | None):
     """
-    Model ko cache karo taake har slider change par dobara load na ho.
-    (Streamlit poora script re-run karta hai har interaction par.)
+    Cache the model so it is not reloaded on every slider change.
+    (Streamlit re-runs the whole script on each interaction.)
     """
     return Detector(model_name=model_name, device=device)
 
@@ -81,7 +81,7 @@ def sidebar_controls() -> dict:
 
 
 def apply_settings(detector: Detector, settings: dict, class_filter: list[str]) -> None:
-    """Cached detector par sliders ki values lagao (model reload kiye bagair)."""
+    """Apply the slider values to the cached detector without reloading the model."""
     detector.confidence = settings["confidence"]
     detector.iou = settings["iou"]
     detector.image_size = settings["imgsz"]
@@ -93,7 +93,7 @@ def apply_settings(detector: Detector, settings: dict, class_filter: list[str]) 
 
 def show_counts(counts: dict[str, int], placeholder) -> None:
     if not counts:
-        placeholder.info("Koi object detect nahi hua.")
+        placeholder.info("No objects detected.")
         return
     placeholder.dataframe(
         {"Object": list(counts.keys()), "Count": list(counts.values())},
@@ -107,15 +107,15 @@ def show_counts(counts: dict[str, int], placeholder) -> None:
 # ---------------------------------------------------------------------------
 
 def tab_image(detector: Detector) -> None:
-    uploaded = st.file_uploader("Image upload karein", type=["jpg", "jpeg", "png", "bmp", "webp"])
+    uploaded = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png", "bmp", "webp"])
     if uploaded is None:
-        st.info("Detection shuru karne ke liye ek image upload karein.")
+        st.info("Upload an image to start detection.")
         return
 
     data = np.frombuffer(uploaded.read(), np.uint8)
     frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
     if frame is None:
-        st.error("Ye image read nahi ho saki — file corrupt ho sakti hai.")
+        st.error("Could not read this image — the file may be corrupt.")
         return
 
     start = time.perf_counter()
@@ -144,14 +144,14 @@ def tab_image(detector: Detector) -> None:
 
 def show_video_result(result: dict) -> None:
     """
-    Process ho chuki video ka result dikhao — player, summary, aur downloads.
+    Show a processed video's result — player, summary and downloads.
 
-    Ye session_state se aata hai, isliye slider hilane ya tab badalne par
-    video **dobara process nahi hoti** — bas yehi result phir se dikh jaata hai.
+    This comes from session_state, so moving a slider or switching tabs does
+    **not** reprocess the video; the same result is simply rendered again.
     """
     st.success(
-        f"✅ Ho gaya — {result['frames']} frames, average {result['fps']:.1f} FPS "
-        f"({result['duration']:.0f}s mein)"
+        f"✅ Done — {result['frames']} frames, average {result['fps']:.1f} FPS "
+        f"(in {result['duration']:.0f}s)"
     )
 
     video_path = Path(result["video"])
@@ -161,18 +161,18 @@ def show_video_result(result: dict) -> None:
         st.video(str(playable))
     else:
         st.info(
-            "Browser mein preview nahi ho sakti (H.264 encoder mojood nahi). "
-            "Neeche se download kar ke VLC ya kisi bhi player mein dekh lein."
+            "In-browser preview is unavailable (no H.264 encoder found). "
+            "Download the file below and play it in VLC or any other player."
         )
 
-    st.subheader("Poori video mein kya kya mila")
+    st.subheader("What was found across the whole video")
     summary = result["summary"]
     if summary:
         st.dataframe(
             {
                 "Object": [row["label"] for row in summary],
-                "Kitne frames mein": [row["frames"] for row in summary],
-                "Ek frame mein max": [row["max_in_frame"] for row in summary],
+                "Detections": [row["frames"] for row in summary],
+                "Max in one frame": [row["max_in_frame"] for row in summary],
                 "Unique objects": [row["unique"] for row in summary],
             },
             width="stretch",
@@ -180,14 +180,14 @@ def show_video_result(result: dict) -> None:
         )
         if not result["tracking"]:
             st.caption(
-                "💡 **Unique objects** ginne ke liye sidebar se **Object tracking** on karein — "
-                "warna ek hi cheez har frame mein dobara gini jaati hai."
+                "💡 Turn on **Object tracking** in the sidebar to count **unique objects** — "
+                "without it, the same object is counted again in every frame."
             )
     else:
-        st.info("Poori video mein koi object detect nahi hua. Confidence threshold kam kar ke dekhein.")
+        st.info("No objects were detected in this video. Try lowering the confidence threshold.")
 
-    # H.264 version chhoti hoti hai aur har player/browser mein chalti hai,
-    # isliye download ke liye wohi behtar hai. Na bani ho to asli file de do.
+    # The H.264 version is smaller and plays anywhere, so prefer it for the
+    # download. Fall back to the original file if it was not produced.
     download_path = Path(playable) if playable and Path(playable).exists() else video_path
 
     col1, col2 = st.columns(2)
@@ -195,7 +195,7 @@ def show_video_result(result: dict) -> None:
         if download_path.exists():
             size_mb = download_path.stat().st_size / 1e6
             st.download_button(
-                f"⬇️ Detected video download karein ({size_mb:.1f} MB)",
+                f"⬇️ Download detected video ({size_mb:.1f} MB)",
                 download_path.read_bytes(),
                 file_name=download_path.name,
                 mime="video/mp4",
@@ -212,27 +212,27 @@ def show_video_result(result: dict) -> None:
                 width="stretch",
             )
 
-    st.caption(f"Files yahan bhi mehfooz hain: `{video_path.parent}`")
+    st.caption(f"These files are also saved in: `{video_path.parent}`")
 
 
 def tab_video(detector: Detector, tracking: bool = False) -> None:
-    uploaded = st.file_uploader("Video upload karein", type=["mp4", "avi", "mov", "mkv"])
+    uploaded = st.file_uploader("Upload a video", type=["mp4", "avi", "mov", "mkv"])
     if uploaded is None:
-        st.info("Ek video file upload karein (.mp4 / .avi).")
+        st.info("Upload a video file (.mp4 / .avi).")
         return
 
-    # Har upload ki apni pehchan. Nayi file aaye to purana result nahi dikhana.
+    # Identify each upload, so a different file does not show a stale result
     job_key = f"{uploaded.name}:{uploaded.size}"
     cached = st.session_state.get("video_result")
 
-    # Ek baar process ho chuki hai? To dobara mat chalao — wohi result dikhao.
-    # (Streamlit har interaction par poora script dobara chalata hai; is check
-    #  ke bagair har slider par video shuru se process hone lagti hai.)
+    # Already processed? Then do not run again — show the same result.
+    # (Streamlit re-runs the whole script on every interaction; without this
+    #  check the video would restart from frame 0 on each slider move.)
     if cached and cached.get("key") == job_key:
         show_video_result(cached)
         st.divider()
-        st.caption("Settings badli hain aur naya result chahiye?")
-        if st.button("🔄 Dobara process karein"):
+        st.caption("Changed the settings and want a fresh result?")
+        if st.button("🔄 Process again"):
             st.session_state.pop("video_result", None)
             st.rerun()
         return
@@ -240,7 +240,7 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
     if not st.button("▶️ Start detection", type="primary"):
         return
 
-    # Streamlit upload memory mein hota hai; OpenCV ko file path chahiye
+    # Streamlit keeps uploads in memory; OpenCV needs a real file path
     with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tmp:
         tmp.write(uploaded.getbuffer())
         video_path = tmp.name
@@ -248,11 +248,11 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         Path(video_path).unlink(missing_ok=True)
-        st.error("Video open nahi ho saki (unsupported codec?).")
+        st.error("Could not open the video (unsupported codec?).")
         return
 
     if tracking:
-        detector.reset_tracker()  # nayi video = IDs 1 se dobara shuru
+        detector.reset_tracker()  # a new video means IDs restart from 1
 
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     src_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -267,7 +267,7 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
     writer: VideoWriter | None = None
     det_logger = DetectionLogger(prefix=f"{stem}_detections")
 
-    # Poori video ka hisaab — sirf aakhri frame ka nahi
+    # Totals for the whole video, not just the last frame
     frames_seen: dict[str, int] = {}
     max_in_frame: dict[str, int] = {}
     unique_ids: dict[str, set] = {}
@@ -321,10 +321,10 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
     frame_slot.empty()
 
     if writer is None:
-        st.error("Video se ek bhi frame nahi mila.")
+        st.error("Not a single frame could be read from this video.")
         return
 
-    with st.spinner("Video ko browser ke liye tayyar kiya ja raha hai..."):
+    with st.spinner("Preparing the video for playback in the browser..."):
         playable = transcode_for_browser(writer.path)
 
     summary = sorted(
@@ -351,20 +351,20 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
         "tracking": tracking,
         "summary": summary,
     }
-    st.rerun()  # ab result view dikhao (aur loop dobara na chale)
+    st.rerun()  # render the result view (and stop the loop from running again)
 
 
 def camera_url_builder() -> str | None:
     """
-    Brand chun kar URL bana lene wala helper — RTSP ka format yaad rakhne ki
-    zaroorat nahi. Bana hua URL return karta hai (ya None).
+    Builds a stream URL from a brand name, so nobody has to memorise RTSP
+    paths. Returns the URL it built, or None.
     """
-    with st.expander("🔧 URL builder — URL khud bana lein", expanded=True):
-        # Pehle qism poochte hain. Warna phone wali apps (ip-webcam, droidcam)
-        # CCTV brands ke beech mein gum ho jaati hain aur user ko lagta hai
-        # ke yahan sirf CCTV hi hai.
+    with st.expander("🔧 URL builder — build the URL for me", expanded=True):
+        # Ask for the type first. Otherwise the phone apps (ip-webcam,
+        # droidcam) get lost among the CCTV brands and it looks as though only
+        # CCTV is supported.
         kind = st.radio(
-            "Kaunsa camera hai?",
+            "What kind of camera is it?",
             ["📱 Mobile phone", "📹 CCTV / IP camera"],
             horizontal=True,
         )
@@ -372,13 +372,13 @@ def camera_url_builder() -> str | None:
 
         if is_mobile:
             st.caption(
-                "Phone ko camera banane ke liye us par ek app chahiye. "
-                "Neeche se apni app chunein — na ho to Play Store / App Store se "
-                "**IP Webcam** install kar lein (free)."
+                "Turning a phone into a camera needs an app on the phone. Pick yours "
+                "below — if you have none, install **IP Webcam** from the Play Store "
+                "or App Store (it is free)."
             )
             options = list(MOBILE_APPS)
         else:
-            st.caption("Apne CCTV/IP camera ka brand chunein.")
+            st.caption("Choose your CCTV or IP camera brand.")
             options = list(CAMERA_BRANDS)
 
         brand = st.selectbox(
@@ -389,15 +389,15 @@ def camera_url_builder() -> str | None:
 
         if is_mobile:
             st.info(
-                f"**{describe(brand)}** — phone par app kholein → **Start server** dabayein → "
-                "screen par jo IP dikhe (jaise `192.168.1.5`) wo neeche daal dein. "
-                "Phone aur PC **same Wi-Fi** par hone chahiye."
+                f"**{describe(brand)}** — open the app on your phone, tap **Start server**, "
+                "then enter the IP address it shows (for example `192.168.1.5`) below. "
+                "The phone and this PC must be on the **same Wi-Fi** network."
             )
 
         col1, col2 = st.columns(2)
         with col1:
             ip = st.text_input(
-                "Phone ka IP" if is_mobile else "Camera ka IP",
+                "Phone IP address" if is_mobile else "Camera IP address",
                 placeholder="192.168.1.5",
             ).strip()
             user = st.text_input("Username", value="" if is_mobile else "admin").strip()
@@ -407,7 +407,7 @@ def camera_url_builder() -> str | None:
             password = st.text_input("Password", type="password")
 
         if is_mobile:
-            st.caption("Phone par aam tor par username/password ki zaroorat nahi — khali chhor dein.")
+            st.caption("Phone apps usually need no username or password — leave them empty.")
 
         quality = "sub"
         if not is_mobile:
@@ -415,11 +415,11 @@ def camera_url_builder() -> str | None:
                 "Stream quality",
                 ["sub", "main"],
                 horizontal=True,
-                help="sub = chhoti resolution (detection ke liye kaafi tez). main = full resolution.",
+                help="sub = lower resolution (plenty for detection, and much faster). main = full resolution.",
             )
 
         if not ip:
-            st.caption("IP daalein to URL khud ban jayega.")
+            st.caption("Enter the IP address and the URL will be built for you.")
             return None
 
         try:
@@ -430,22 +430,22 @@ def camera_url_builder() -> str | None:
             return None
 
         st.code(url, language="text")
-        st.caption("Ye URL neeche box mein copy karein — ya pehle VLC mein test kar lein.")
+        st.caption("Copy this URL into the box below — or test it in VLC first.")
         return url
 
 
 def save_camera_form(url: str, default_kind: str) -> None:
-    """URL ko naam de kar cameras.json mein save karne ka chhota form."""
-    with st.expander("💾 Is camera ko naam de kar save karein"):
+    """A small form for saving a URL under a name in cameras.json."""
+    with st.expander("💾 Save this camera under a name"):
         col1, col2 = st.columns([1, 2])
         with col1:
-            name = st.text_input("Naam", placeholder="gate", key=f"savename_{default_kind}").strip()
+            name = st.text_input("Name", placeholder="gate", key=f"savename_{default_kind}").strip()
         with col2:
-            note = st.text_input("Note (optional)", placeholder="front gate ka camera",
+            note = st.text_input("Note (optional)", placeholder="front gate camera",
                                  key=f"savenote_{default_kind}").strip()
         if st.button("Save camera", key=f"savebtn_{default_kind}"):
             if not name:
-                st.warning("Pehle naam daalein.")
+                st.warning("Enter a name first.")
                 return
             try:
                 profile = save_camera(name, url, kind=default_kind, note=note)
@@ -456,7 +456,7 @@ def save_camera_form(url: str, default_kind: str) -> None:
 
 
 def tab_live(detector: Detector, tracking: bool) -> None:
-    """Saved camera, local webcam, ya network camera (phone / CCTV / IP camera)."""
+    """A saved camera, the local webcam, or a network camera (phone / CCTV / IP)."""
     try:
         saved = load_cameras()
     except CameraStoreError as exc:
@@ -476,13 +476,13 @@ def tab_live(detector: Detector, tracking: bool) -> None:
         )
         profile = saved[name]
         st.caption(f"`{profile.safe_url}`" + (f"  —  {profile.note}" if profile.note else ""))
-        # "0" jaisi entry USB webcam hai — OpenCV ko int chahiye
+        # An entry like "0" is a USB webcam, and OpenCV needs an int for those
         source: int | str = int(profile.url) if profile.url.isdigit() else profile.url
 
     elif source_type == "Local webcam":
         st.caption(
-            "Note: webcam us machine ka use hota hai jahan ye app chal rahi hai "
-            "(remote server par deploy karein to browser ka camera nahi milega)."
+            "Note: this uses the webcam of the machine running the app "
+            "(deploy it on a remote server and you will not get the browser's camera)."
         )
         source = int(
             st.number_input("Camera index", min_value=0, max_value=10, value=config.CAMERA_INDEX)
@@ -494,21 +494,21 @@ def tab_live(detector: Detector, tracking: bool) -> None:
         source = st.text_input(
             "Stream URL",
             value=built or "",
-            placeholder="http://192.168.1.5:8080/video   ya   rtsp://user:pass@192.168.1.10:554/stream1",
-            help="Phone: IP Webcam app ka URL. CCTV/NVR: RTSP URL.",
+            placeholder="http://192.168.1.5:8080/video   or   rtsp://user:pass@192.168.1.10:554/stream1",
+            help="Phone: the URL from the IP Webcam app. CCTV/NVR: the RTSP URL.",
         ).strip()
         st.caption(
-            "Phone aur PC same Wi-Fi par hone chahiye. URL pehle VLC mein test kar lein "
-            "(Media → Open Network Stream)."
+            "The phone and this PC must be on the same Wi-Fi network. Test the URL in "
+            "VLC first (Media → Open Network Stream)."
         )
         if not source:
-            st.info("Stream URL daalein.")
+            st.info("Enter a stream URL.")
             return
         save_camera_form(source, "cctv" if source.lower().startswith("rtsp://") else "mobile")
 
     run = st.checkbox("🎥 Start live detection")
     if not run:
-        st.info("Live detection shuru karne ke liye checkbox on karein.")
+        st.info("Tick the checkbox to start live detection.")
         return
 
     is_stream = isinstance(source, str)
@@ -523,13 +523,13 @@ def tab_live(detector: Detector, tracking: bool) -> None:
         cap.release()
         if is_stream:
             st.error(
-                "Stream connect nahi ho saka. URL, Wi-Fi network, aur "
-                "username/password check karein — pehle VLC mein test karein."
+                "Could not connect to the stream. Check the URL, the Wi-Fi network and "
+                "the username/password — and test it in VLC first."
             )
         else:
             st.error(
-                f"Webcam (index {source}) open nahi hui. Doosra index try karein, "
-                "ya check karein ke koi aur app camera use to nahi kar rahi."
+                f"Could not open the webcam (index {source}). Try another index, or "
+                "check that no other application is using the camera."
             )
         return
 
@@ -539,11 +539,11 @@ def tab_live(detector: Detector, tracking: bool) -> None:
     fps_counter = FPSCounter()
 
     try:
-        # Checkbox off hote hi Streamlit script re-run karta hai aur loop khatam ho jaata hai
+        # Unticking the checkbox re-runs the script, which ends this loop
         while True:
             ok, frame = cap.read()
             if not ok:
-                st.warning("Frame nahi mila — camera disconnect ho gaya?")
+                st.warning("No frame received — did the camera disconnect?")
                 break
 
             detections = detector.track(frame) if tracking else detector.detect(frame)
@@ -563,7 +563,7 @@ def tab_live(detector: Detector, tracking: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.title("🎯 YOLO Real-Time Object Detection")
+    st.title("🎯 EyeSpot — Real-Time Object Detection")
 
     settings = sidebar_controls()
 
@@ -575,7 +575,7 @@ def main() -> None:
 
     st.sidebar.divider()
     class_filter = st.sidebar.multiselect(
-        "Class filter (khali = saari classes)",
+        "Class filter (empty = all classes)",
         options=detector.class_names,
         default=[],
     )
@@ -584,7 +584,7 @@ def main() -> None:
     tracking = st.sidebar.toggle(
         "Object tracking",
         value=False,
-        help="Har object ko persistent ID deta hai jo frames ke darmiyan same rehti hai.",
+        help="Gives every object a persistent ID that stays the same across frames.",
     )
     st.sidebar.caption(f"Device: `{detector.device}`  •  Classes: {len(detector.class_names)}")
 

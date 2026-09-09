@@ -1,4 +1,4 @@
-"""Utility package — FPS counting, camera profiles, output saving, aur on-screen overlay."""
+"""Utility package — FPS counting, camera profiles, output saving and the on-screen overlay."""
 
 from .cameras import (
     CameraProfile,

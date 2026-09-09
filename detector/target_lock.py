@@ -1,20 +1,21 @@
 """
-target_lock.py — Ek specific object par "lock" kar ke usay follow karna.
+target_lock.py — Locking onto one specific object and following it.
 
-Detection batata hai ke frame mein kya kya hai. Tracking har object ko ek
-persistent ID deti hai. **Target lock** us se agla qadam hai: aap ek ID chun
-lete hain, aur system sirf usi object ko follow karta hai —
+Detection tells you what is in the frame. Tracking gives every object a
+persistent ID. **Target lock** is the step beyond that: you pick one ID and the
+system follows only that object —
 
-  - locked target ke around motta highlighted box + corner brackets
-  - crosshair aur frame ke center se offset (kis taraf ja raha hai)
-  - trail (pichhle N frames ka raasta)
-  - baaki sab objects dim ho jaate hain
-  - target ghayab ho jaye to "LOST" status, aur wapas aane par khud dobara pakad leta hai
+  - a bold highlighted box with corner brackets around the locked target
+  - a crosshair, plus the offset from the centre of the frame (which way it is)
+  - a trail showing the last N frames of its path
+  - every other object dimmed
+  - a "LOST" status if the target disappears, and automatic re-acquisition
+    when it comes back
 
-Lock karne ke tareeqe:
-  1. Video window mein object par **mouse click**
-  2. `--lock person` — pehle nazar aane wale person par khud lock kar lo
-  3. `--lock-id 3` — jis ki track ID 3 ho
+Three ways to lock on:
+  1. **Click** the object in the video window
+  2. `--lock person` — lock the first person that appears
+  3. `--lock-id 3` — lock whichever object has track ID 3
 """
 
 from __future__ import annotations
@@ -26,21 +27,21 @@ import numpy as np
 
 from .detect import Detection
 
-# Lock UI ke colors (BGR)
+# Lock HUD colours (BGR)
 _LOCKED = (60, 240, 255)     # amber/yellow — locked target
-_LOST = (60, 60, 240)        # red — target ghayab
+_LOST = (60, 60, 240)        # red — target missing
 _TRAIL = (200, 220, 255)
 _TEXT = (20, 20, 20)
 
 
 class TargetLock:
     """
-    Ek locked target ki state sambhalta hai.
+    Holds the state of a single locked target.
 
     Usage:
         lock = TargetLock()
         lock.lock(track_id=3)
-        target = lock.update(detections)     # har frame par
+        target = lock.update(detections)     # once per frame
         lock.draw(frame, target)
     """
 
@@ -48,7 +49,7 @@ class TargetLock:
         self.track_id: int | None = None
         self.label: str | None = None
         self.trail: deque[tuple[int, int]] = deque(maxlen=trail_length)
-        self.lost_after = lost_after      # itne frames na dikhe to "LOST"
+        self.lost_after = lost_after      # frames missing before showing "LOST"
         self.frames_missing = 0
         self.frames_locked = 0
 
@@ -60,16 +61,16 @@ class TargetLock:
 
     @property
     def is_lost(self) -> bool:
-        """Target locked to hai, lekin filhal frame mein nazar nahi aa raha."""
+        """A target is locked, but is not visible in the current frame."""
         return self.is_active and self.frames_missing > 0
 
     @property
     def is_stale(self) -> bool:
-        """Itni der se ghayab hai ke shayad wapas na aaye."""
+        """Missing long enough that it may not come back at all."""
         return self.frames_missing > self.lost_after
 
     def lock(self, track_id: int, label: str | None = None) -> None:
-        """Kisi track ID par lock karo (purani trail saaf ho jaati hai)."""
+        """Lock onto a track ID (this clears any previous trail)."""
         self.track_id = int(track_id)
         self.label = label
         self.trail.clear()
@@ -77,19 +78,19 @@ class TargetLock:
         self.frames_locked = 0
 
     def clear(self) -> None:
-        """Lock hata do."""
+        """Release the lock."""
         self.track_id = None
         self.label = None
         self.trail.clear()
         self.frames_missing = 0
         self.frames_locked = 0
 
-    # -- lock karne ke tareeqe ----------------------------------------------
+    # -- ways to lock on ----------------------------------------------------
 
     def lock_at_point(self, detections: list[Detection], x: int, y: int) -> Detection | None:
         """
-        Mouse click par lock karo. Agar overlapping boxes hon to sabse chhota
-        (yani sabse specific) object chunte hain.
+        Lock onto whatever was clicked. When boxes overlap, the smallest (and
+        therefore most specific) object wins.
         """
         hits = [d for d in detections if d.contains(x, y) and d.track_id is not None]
         if not hits:
@@ -101,9 +102,9 @@ class TargetLock:
 
     def lock_first(self, detections: list[Detection], label: str | None = None) -> Detection | None:
         """
-        Sabse "aham" object par khud lock karo — agar label diya hai to us class ka,
-        warna kisi bhi class ka. Sabse bara + confident object chunte hain
-        (ke wo aam tor par main subject hota hai).
+        Lock onto the most prominent object automatically — of the given class
+        if a label is supplied, otherwise of any class. The largest and most
+        confident object is chosen, since that is usually the main subject.
         """
         pool = [d for d in detections if d.track_id is not None]
         if label:
@@ -115,12 +116,12 @@ class TargetLock:
         self.lock(target.track_id, target.label)
         return target
 
-    # -- har frame ----------------------------------------------------------
+    # -- per frame ----------------------------------------------------------
 
     def update(self, detections: list[Detection]) -> Detection | None:
         """
-        Is frame ki detections mein se locked target dhoondo.
-        Mil jaye to trail update kar ke wo Detection return karo, warna None.
+        Look for the locked target among this frame's detections. If found,
+        update the trail and return that Detection; otherwise return None.
         """
         if not self.is_active:
             return None
@@ -139,7 +140,7 @@ class TargetLock:
     # -- drawing ------------------------------------------------------------
 
     def draw(self, frame: np.ndarray, target: Detection | None) -> np.ndarray:
-        """Locked target ka pura HUD draw karo (brackets, crosshair, trail, status)."""
+        """Draw the full lock HUD: brackets, crosshair, trail and status."""
         if not self.is_active:
             return frame
 
@@ -152,14 +153,14 @@ class TargetLock:
         x1, y1, x2, y2 = target.box
         cx, cy = target.center
 
-        # Motta box + corner brackets (classic "lock-on" look)
+        # Bold box plus corner brackets — the classic "lock-on" look
         cv2.rectangle(frame, (x1, y1), (x2, y2), _LOCKED, 2)
         self._draw_brackets(frame, x1, y1, x2, y2)
 
-        # Crosshair target ke center par
+        # Crosshair at the centre of the target
         cv2.drawMarker(frame, (cx, cy), _LOCKED, cv2.MARKER_CROSS, 22, 2)
 
-        # Frame ke center se target tak line — "kis taraf hai" ka andaza
+        # A line from the frame centre to the target — shows which way it lies
         fh, fw = frame.shape[:2]
         frame_center = (fw // 2, fh // 2)
         cv2.line(frame, frame_center, (cx, cy), _LOCKED, 1, cv2.LINE_AA)
@@ -169,7 +170,7 @@ class TargetLock:
         return frame
 
     def _draw_brackets(self, frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> None:
-        """Chaar corners par L-shape brackets."""
+        """L-shaped brackets at all four corners."""
         arm = max(12, min(x2 - x1, y2 - y1) // 5)
         t = 3
         for (px, py), (dx, dy) in (
@@ -180,10 +181,10 @@ class TargetLock:
             cv2.line(frame, (px, py), (px, py + arm * dy), _LOCKED, t)
 
     def _draw_trail(self, frame: np.ndarray) -> None:
-        """Target ka pichhla raasta — purane points patle aur faded."""
+        """The target's recent path — older points thinner and more faded."""
         points = list(self.trail)
         for i in range(1, len(points)):
-            weight = i / len(points)  # naye points zyada numaya
+            weight = i / len(points)  # newer points stand out more
             cv2.line(
                 frame,
                 points[i - 1],
@@ -200,7 +201,7 @@ class TargetLock:
         x1: int, y1: int, x2: int, y2: int,
         frame_center: tuple[int, int],
     ) -> None:
-        """Target ke upar ek info chip: ID, label, aur center se offset."""
+        """An info chip above the target: ID, label and offset from centre."""
         cx, cy = target.center
         dx, dy = cx - frame_center[0], cy - frame_center[1]
 
@@ -215,7 +216,7 @@ class TargetLock:
         font = cv2.FONT_HERSHEY_SIMPLEX
         (tw, th), baseline = cv2.getTextSize(text, font, 0.5, 1)
 
-        # Chip box ke upar, ya jagah na ho to neeche
+        # Chip above the box, or below it when there is no room
         chip_bottom = y1 - 6 if y1 - th - baseline - 10 >= 0 else y2 + th + baseline + 10
         chip_top = chip_bottom - th - baseline - 6
         chip_x = max(0, min(x1, frame.shape[1] - tw - 12))
@@ -227,7 +228,7 @@ class TargetLock:
         )
 
     def _draw_lost_banner(self, frame: np.ndarray) -> None:
-        """Target ghayab ho to screen ke center mein warning."""
+        """A warning across the centre of the screen when the target is missing."""
         h, w = frame.shape[:2]
         text = (
             f"TARGET #{self.track_id} LOST ({self.frames_missing}f)"
@@ -244,7 +245,7 @@ class TargetLock:
     # -- reporting ----------------------------------------------------------
 
     def status_line(self) -> str:
-        """Overlay panel ke liye ek chhoti si status line."""
+        """A short status line for the overlay panel."""
         if not self.is_active:
             return "Lock: none (click on object)"
         if self.is_lost:

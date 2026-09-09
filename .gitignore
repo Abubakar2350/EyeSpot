@@ -5,19 +5,19 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Model weights (auto-download ho jaate hain — repo mein rakhne ki zaroorat nahi)
+# Model weights (downloaded automatically — no need to keep them in the repo)
 models/
 *.pt
 
 # Generated outputs
 outputs/
 
-# Saved camera profiles — CCTV ke passwords hote hain, repo mein NAHI jaani chahiye.
-# Template `cameras.example.json` commit hoti hai.
+# Saved camera profiles — these contain CCTV passwords and must NOT be committed.
+# The template `cameras.example.json` is committed instead.
 cameras.json
 
-# Note: sample.jpg jaan bujh kar commit ki gayi hai — test_smoke.py isi par
-# detection aur tracking test karta hai. Nikaal dein to wo 2 tests skip ho jayenge.
+# Note: sample.jpg is committed on purpose — test_smoke.py uses it for the
+# detection and tracking tests. Remove it and those two tests will skip.
 
 # Editor / OS
 .vscode/

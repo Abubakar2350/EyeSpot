@@ -1,4 +1,4 @@
-"""Detection package — model loading aur frame processing logic."""
+"""Detection package — model loading and frame processing logic."""
 
 from .detect import Detection, Detector
 from .model_loader import load_model, resolve_device

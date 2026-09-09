@@ -1,17 +1,19 @@
 """
-cameras.py — Camera profiles: camera ko ek naam se save karo, phir wohi naam use karo.
+cameras.py — Camera profiles: save a camera under a name, then reuse the name.
 
-Masla: har baar poora URL type karna (`rtsp://admin:pass@192.168.1.10:554/stream1`)
-takleef deh hai, aur password shell history mein chala jaata hai.
+The problem: typing the full URL every time
+(`rtsp://admin:pass@192.168.1.10:554/stream1`) is tedious, and the password
+ends up in your shell history.
 
-Hal: ek baar `cameras.json` mein save kar do, phir sirf `--camera gate` likhein.
+The fix: save it once in `cameras.json`, then just pass `--camera gate`.
 
-> **Ahem:** `cameras.json` git mein **nahi** jaati (.gitignore mein hai) kyunke
-> us mein CCTV ke passwords hote hain. Repo mein `cameras.example.json` template
-> hai — doosre PC par usay copy kar ke apni values daal lein.
+> **Important:** `cameras.json` is **not** committed to git (it is listed in
+> .gitignore) because it contains CCTV passwords. The repository ships
+> `cameras.example.json` as a template — copy it on a new machine and fill in
+> your own values.
 
-Yahan URL banane ke helpers bhi hain taake brand ka RTSP format yaad rakhne ki
-zaroorat na pade:
+This module also builds URLs for you, so there is no need to remember each
+brand's RTSP format:
 
     build_url("tplink", "192.168.1.10", user="admin", password="pass@123")
     -> "rtsp://admin:pass%40123@192.168.1.10:554/stream2"
@@ -29,16 +31,16 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# Camera ki qism — sirf display/documentation ke liye, behaviour par asar nahi
+# Camera type — used for display and documentation only; it does not affect behaviour
 KINDS = ("mobile", "cctv", "usb", "other")
 
 
 # ---------------------------------------------------------------------------
-# Brand templates — "is brand ka RTSP URL kaisa hota hai"
+# Brand templates — "what does this brand's RTSP URL look like"
 # ---------------------------------------------------------------------------
 
-# main = full resolution (accurate lekin bhaari), sub = chhoti resolution
-# (detection ke liye kaafi tez — CPU par isi ko tarjeeh dein)
+# main = full resolution (accurate but heavy), sub = lower resolution
+# (noticeably faster for detection — prefer this on CPU)
 CAMERA_BRANDS: dict[str, dict] = {
     "hikvision": {
         "label": "Hikvision",
@@ -52,7 +54,7 @@ CAMERA_BRANDS: dict[str, dict] = {
         "main": "/cam/realmonitor?channel=1&subtype=0",
         "sub": "/cam/realmonitor?channel=1&subtype=1",
     },
-    "cpplus": {  # CP Plus Dahua ka hi firmware use karta hai
+    "cpplus": {  # CP Plus runs the same firmware as Dahua
         "label": "CP Plus",
         "port": 554,
         "main": "/cam/realmonitor?channel=1&subtype=0",
@@ -70,31 +72,31 @@ CAMERA_BRANDS: dict[str, dict] = {
         "main": "/h264Preview_01_main",
         "sub": "/h264Preview_01_sub",
     },
-    "onvif": {  # generic — zyada tar sasti IP cameras
-        "label": "ONVIF (generic — koi bhi sasti IP camera)",
+    "onvif": {  # generic — covers most inexpensive IP cameras
+        "label": "ONVIF (generic — most inexpensive IP cameras)",
         "port": 554,
         "main": "/onvif1",
         "sub": "/onvif2",
     },
 }
 
-# Mobile phone ko IP camera banane wali apps — ye HTTP par stream deti hain
-# (RTSP nahi), isliye inhe alag rakha hai.
+# Apps that turn a phone into an IP camera. These stream over HTTP rather than
+# RTSP, which is why they are kept separate.
 MOBILE_APPS: dict[str, dict] = {
     "ip-webcam": {
-        "label": "IP Webcam — Android (sabse aam, free)",
+        "label": "IP Webcam — Android (most common, free)",
         "scheme": "http",
         "port": 8080,
         "path": "/video",
     },
     "droidcam": {
-        "label": "DroidCam — Android + iPhone",
+        "label": "DroidCam — Android and iPhone",
         "scheme": "http",
         "port": 4747,
         "path": "/video",
     },
     "iriun": {
-        "label": "Iriun Webcam — Android + iPhone",
+        "label": "Iriun Webcam — Android and iPhone",
         "scheme": "http",
         "port": 8080,
         "path": "/video",
@@ -103,20 +105,20 @@ MOBILE_APPS: dict[str, dict] = {
 
 
 def describe(key: str) -> str:
-    """Dropdown mein dikhane ke liye padha ja sakne wala naam."""
+    """A human-readable name for use in dropdowns."""
     spec = MOBILE_APPS.get(key) or CAMERA_BRANDS.get(key) or {}
     return spec.get("label", key)
 
 
 # ---------------------------------------------------------------------------
-# URL banana aur chhupana
+# Building and masking URLs
 # ---------------------------------------------------------------------------
 
 def mask_credentials(source: str | int) -> str:
     """
-    Logs/screen par password na dikhe: rtsp://user:pass@host -> rtsp://user:***@host
+    Hide the password before printing: rtsp://user:pass@host -> rtsp://user:***@host
 
-    Har us jagah use karein jahan URL print ho raha ho.
+    Use this everywhere a URL is written to logs or the screen.
     """
     text = str(source)
     if "@" not in text or "://" not in text:
@@ -138,17 +140,17 @@ def build_url(
     quality: str = "sub",
 ) -> str:
     """
-    Brand ke naam se poora stream URL bana do.
+    Build a complete stream URL from a brand name.
 
     Args:
-        brand: `CAMERA_BRANDS` ya `MOBILE_APPS` ka koi naam (e.g. "tplink", "ip-webcam")
-        ip: camera ka IP, e.g. "192.168.1.10"
-        user/password: CCTV ka login (mobile apps par aam tor par zaroorat nahi)
-        port: default port override karna ho to
-        quality: "sub" (chhoti resolution, tez — default) ya "main" (full)
+        brand: any key from `CAMERA_BRANDS` or `MOBILE_APPS` (e.g. "tplink", "ip-webcam")
+        ip: the camera's IP address, e.g. "192.168.1.10"
+        user/password: CCTV login (phone apps usually need neither)
+        port: override the brand's default port
+        quality: "sub" (lower resolution, faster — the default) or "main" (full)
 
-    Password mein special characters (@ : / ?) khud URL-encode ho jaate hain,
-    warna URL toot jaata hai.
+    Special characters in the password (@ : / ?) are URL-encoded automatically,
+    otherwise the URL would be malformed.
     """
     key = brand.strip().lower()
 
@@ -159,18 +161,18 @@ def build_url(
 
     if key not in CAMERA_BRANDS:
         known = ", ".join(sorted({*CAMERA_BRANDS, *MOBILE_APPS}))
-        raise ValueError(f"Brand '{brand}' maloom nahi. Available: {known}")
+        raise ValueError(f"Unknown brand '{brand}'. Available: {known}")
 
     spec = CAMERA_BRANDS[key]
     if quality not in ("main", "sub"):
-        raise ValueError("quality sirf 'main' ya 'sub' ho sakti hai")
+        raise ValueError("quality must be either 'main' or 'sub'")
 
     auth = _auth_part(user, password)
     return f"rtsp://{auth}{ip}:{port or spec['port']}{spec[quality]}"
 
 
 def _auth_part(user: str | None, password: str | None) -> str:
-    """URL ka "user:pass@" hissa — dono khali hon to kuch nahi."""
+    """The "user:pass@" portion of a URL — empty when no credentials are given."""
     if not user:
         return ""
     if not password:
@@ -184,7 +186,7 @@ def _auth_part(user: str | None, password: str | None) -> str:
 
 @dataclass
 class CameraProfile:
-    """Ek saved camera — naam, uska source, aur thoda context."""
+    """A saved camera — its name, its source, and a little context."""
 
     name: str
     url: str                 # "0" (USB webcam) / "http://..." / "rtsp://..."
@@ -193,12 +195,12 @@ class CameraProfile:
 
     @property
     def safe_url(self) -> str:
-        """Print karne ke liye — password chhupa hua."""
+        """The URL with the password masked, safe to print."""
         return mask_credentials(self.url)
 
 
 class CameraStoreError(RuntimeError):
-    """cameras.json parh/likh na sakein to (corrupt JSON, permissions, etc.)."""
+    """Raised when cameras.json cannot be read or written (bad JSON, permissions...)."""
 
 
 def _store_path(path: Path | str | None = None) -> Path:
@@ -207,8 +209,8 @@ def _store_path(path: Path | str | None = None) -> Path:
 
 def load_cameras(path: Path | str | None = None) -> dict[str, CameraProfile]:
     """
-    Saari saved cameras parho. File na ho to khali dict (ye error nahi hai —
-    pehli baar chalane par normal hai).
+    Read every saved camera. A missing file yields an empty dict — that is not
+    an error, it is simply the normal state on a first run.
     """
     store = _store_path(path)
     if not store.is_file():
@@ -218,21 +220,21 @@ def load_cameras(path: Path | str | None = None) -> dict[str, CameraProfile]:
         raw = json.loads(store.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise CameraStoreError(
-            f"{store} valid JSON nahi hai (line {exc.lineno}): {exc.msg}\n"
-            "File edit karte waqt comma ya bracket reh gaya hoga. "
-            "Ya usay delete kar ke cameras.example.json dobara copy kar lein."
+            f"{store} is not valid JSON (line {exc.lineno}): {exc.msg}\n"
+            "A comma or bracket was probably lost while editing. You can also "
+            "delete the file and copy cameras.example.json again."
         ) from exc
 
     if not isinstance(raw, dict):
-        raise CameraStoreError(f"{store} mein top level par object (dict) hona chahiye.")
+        raise CameraStoreError(f"{store} must contain a JSON object at the top level.")
 
     cameras: dict[str, CameraProfile] = {}
     for name, entry in raw.items():
-        # Shortcut: {"phone": "http://..."} bhi chalta hai, poora object bhi
+        # Shorthand form {"phone": "http://..."} is accepted alongside the full object
         if isinstance(entry, str):
             entry = {"url": entry}
         if not isinstance(entry, dict) or not entry.get("url"):
-            logger.warning("Camera '%s' skip ki gayi — 'url' nahi mila.", name)
+            logger.warning("Skipping camera '%s' — no 'url' field.", name)
             continue
         cameras[name] = CameraProfile(
             name=name,
@@ -244,7 +246,7 @@ def load_cameras(path: Path | str | None = None) -> dict[str, CameraProfile]:
 
 
 def get_camera(name: str, path: Path | str | None = None) -> CameraProfile | None:
-    """Naam se ek camera nikalo (case-insensitive). Na mile to None."""
+    """Look up one camera by name (case-insensitive). Returns None if not found."""
     cameras = load_cameras(path)
     if name in cameras:
         return cameras[name]
@@ -260,8 +262,8 @@ def save_camera(
     path: Path | str | None = None,
 ) -> CameraProfile:
     """
-    Ek camera save/update karo aur cameras.json likh do.
-    Wohi naam dobara dein to purani entry replace ho jaati hai.
+    Save or update a camera and write cameras.json.
+    Reusing a name replaces the existing entry.
     """
     store = _store_path(path)
     cameras = load_cameras(store)
@@ -277,14 +279,14 @@ def save_camera(
         store.parent.mkdir(parents=True, exist_ok=True)
         store.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:
-        raise CameraStoreError(f"{store} likhi nahi ja saki: {exc}") from exc
+        raise CameraStoreError(f"Could not write {store}: {exc}") from exc
 
     logger.info("Camera '%s' saved in %s", name, store)
     return profile
 
 
 def delete_camera(name: str, path: Path | str | None = None) -> bool:
-    """Ek camera hata do. Mili aur hat gayi to True."""
+    """Remove a camera. Returns True if it existed and was deleted."""
     store = _store_path(path)
     cameras = load_cameras(store)
     if name not in cameras:
@@ -300,13 +302,13 @@ def delete_camera(name: str, path: Path | str | None = None) -> bool:
 
 
 def format_camera_table(cameras: dict[str, CameraProfile]) -> str:
-    """`--list-cameras` ke liye ek saaf table (passwords chhupe hue)."""
+    """A clean table for `--list-cameras`, with passwords masked."""
     if not cameras:
         return (
-            "Koi camera save nahi hai.\n\n"
-            "Add karne ke liye:\n"
+            "No cameras saved yet.\n\n"
+            "To add one:\n"
             "  python main.py --source http://192.168.1.5:8080/video --save-camera phone\n"
-            "Ya cameras.example.json ko cameras.json bana kar edit kar lein."
+            "Or copy cameras.example.json to cameras.json and edit it."
         )
 
     width = max(len(name) for name in cameras)

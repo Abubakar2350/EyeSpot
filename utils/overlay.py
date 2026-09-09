@@ -1,7 +1,7 @@
 """
-overlay.py — Screen ke upar info panel draw karna (FPS, object counts, status).
+overlay.py — Draws the on-screen info panel (FPS, object counts, status).
 
-Ye purely cosmetic hai; detection logic se bilkul alag rakha gaya hai.
+Purely cosmetic and deliberately kept separate from the detection logic.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ _WARN = (60, 180, 255)
 
 
 def _fps_color(fps: float) -> tuple[int, int, int]:
-    """Achha FPS = hara, kam FPS = orange, bohot kam = laal."""
+    """Good FPS = green, low = orange, very low = red."""
     if fps >= 20:
         return _ACCENT
     if fps >= 10:
@@ -35,8 +35,8 @@ def draw_overlay(
     max_items: int = 8,
 ) -> np.ndarray:
     """
-    Frame ke top-left par ek semi-transparent panel banao jismein:
-    FPS, total objects, per-class counts, aur current confidence threshold ho.
+    Draw a semi-transparent panel in the top-left corner showing FPS, the total
+    object count, per-class counts and the current confidence threshold.
     """
     lines: list[tuple[str, tuple[int, int, int]]] = [
         (f"FPS: {fps:5.1f}", _fps_color(fps)),
@@ -56,7 +56,7 @@ def draw_overlay(
     if paused:
         lines.append(("[ PAUSED ]", _WARN))
 
-    # Panel ka size text ke hisaab se
+    # Size the panel to fit the text
     pad = 10
     line_h = 22
     width = max(
@@ -64,7 +64,7 @@ def draw_overlay(
     ) + pad * 2
     height = line_h * len(lines) + pad
 
-    # Semi-transparent background (frame ke saath blend kar ke)
+    # Semi-transparent background, blended with the frame underneath
     panel_w = min(width, frame.shape[1] - 20)
     panel_h = min(height, frame.shape[0] - 20)
     roi = frame[10 : 10 + panel_h, 10 : 10 + panel_w]
@@ -83,7 +83,7 @@ def draw_overlay(
 
 
 def draw_help_bar(frame: np.ndarray, text: str) -> np.ndarray:
-    """Frame ke neeche keyboard shortcuts ki ek line dikhao."""
+    """Draw a single line of keyboard shortcuts along the bottom of the frame."""
     h, w = frame.shape[:2]
     bar_h = 26
     roi = frame[h - bar_h : h, 0:w]

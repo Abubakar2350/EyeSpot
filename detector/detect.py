@@ -1,9 +1,9 @@
 """
-detect.py — Detection logic: ek frame lo, objects detect karo, boxes draw karo.
+detect.py — Detection logic: take a frame, find objects, draw boxes.
 
-Design: `Detector` class model ko hold karti hai aur har frame par
-`detect()` call hota hai. Drawing alag method (`draw`) mein hai taake
-Streamlit UI ya koi aur frontend sirf raw detections bhi le sakay.
+Design: the `Detector` class holds the model and `detect()` is called once per
+frame. Drawing lives in a separate method (`draw`) so that a Streamlit UI, or
+any other frontend, can consume the raw detections instead.
 """
 
 from __future__ import annotations
@@ -21,15 +21,15 @@ from .model_loader import class_name_to_id, load_model
 
 @dataclass(frozen=True)
 class Detection:
-    """Ek detected object — plain data, koi YOLO-specific cheez nahi."""
+    """A single detected object — plain data, nothing YOLO-specific."""
 
     class_id: int
     label: str
     confidence: float
-    box: tuple[int, int, int, int]  # (x1, y1, x2, y2) pixels mein
+    box: tuple[int, int, int, int]  # (x1, y1, x2, y2) in pixels
 
-    # Tracking mode mein har object ko ek persistent ID milti hai jo frames ke
-    # darmiyan same rehti hai. Detection-only mode mein ye None hoti hai.
+    # In tracking mode every object gets a persistent ID that stays the same
+    # across frames. It is None in detection-only mode.
     track_id: int | None = None
 
     @property
@@ -50,19 +50,19 @@ class Detection:
         return (x1 + x2) // 2, (y1 + y2) // 2
 
     def contains(self, x: int, y: int) -> bool:
-        """Kya ye point is box ke andar hai? (mouse click se target lock karne ke liye)"""
+        """Is this point inside the box? (used to lock a target by mouse click)"""
         x1, y1, x2, y2 = self.box
         return x1 <= x <= x2 and y1 <= y <= y2
 
 
 def _build_palette(num_classes: int) -> list[tuple[int, int, int]]:
     """
-    Har class ke liye ek distinct BGR color banao (HSV wheel ko evenly ghumaa ke).
-    Isse similar objects hamesha same color ke rehte hain.
+    Build a distinct BGR colour per class by stepping evenly around the HSV
+    wheel, so that objects of the same class always share a colour.
     """
     palette: list[tuple[int, int, int]] = []
     for i in range(max(num_classes, 1)):
-        hue = (i * 0.618033988749895) % 1.0  # golden ratio = achhi spread
+        hue = (i * 0.618033988749895) % 1.0  # golden ratio gives a good spread
         r, g, b = colorsys.hsv_to_rgb(hue, 0.75, 0.95)
         palette.append((int(b * 255), int(g * 255), int(r * 255)))  # OpenCV = BGR
     return palette
@@ -70,7 +70,7 @@ def _build_palette(num_classes: int) -> list[tuple[int, int, int]]:
 
 class Detector:
     """
-    YOLO detector ka wrapper.
+    A thin wrapper around the YOLO model.
 
     Usage:
         det = Detector()
@@ -96,7 +96,7 @@ class Detector:
 
         names = list(class_filter) if class_filter else list(config.CLASS_FILTER or [])
         self.class_filter_names = names
-        # Empty list => saari classes. Ultralytics ko None chahiye is case mein.
+        # An empty list means all classes; Ultralytics expects None in that case.
         self.class_ids = class_name_to_id(self.model, names) or None
 
         self._palette = _build_palette(len(self.model.names))
@@ -105,11 +105,11 @@ class Detector:
 
     @property
     def class_names(self) -> list[str]:
-        """Model ki saari class labels (sorted)."""
+        """Every class label the model knows, sorted by class ID."""
         return [self.model.names[i] for i in sorted(self.model.names)]
 
     def set_confidence(self, value: float) -> float:
-        """Confidence threshold ko 0.05–0.95 ke beech clamp kar ke set karo."""
+        """Clamp the confidence threshold to 0.05–0.95 and apply it."""
         self.confidence = float(min(0.95, max(0.05, value)))
         return self.confidence
 
@@ -117,10 +117,10 @@ class Detector:
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         """
-        Ek BGR frame par YOLO chalao aur Detection objects ki list return karo.
+        Run YOLO on a single BGR frame and return a list of Detection objects.
 
-        Ye stateless hai — har frame independent. Objects ko frames ke darmiyan
-        follow karna ho to `track()` use karein.
+        This is stateless — every frame is independent. Use `track()` to follow
+        objects across frames.
         """
         results = self.model.predict(
             source=frame,
@@ -132,23 +132,23 @@ class Detector:
             device=self.device,
             verbose=False,
         )
-        # with_ids=False zaroori hai: ek baar track() chalne ke baad Ultralytics
-        # apne tracker callbacks predictor par lagi rehne deta hai, is liye
-        # predict() bhi IDs return karne lagta hai. detect() stateless rehna
-        # chahiye, warna tracking off karne par bhi purani IDs aati rahengi.
+        # with_ids=False matters here: once track() has run, Ultralytics leaves
+        # its tracker callbacks attached to the predictor, so predict() starts
+        # returning IDs too. detect() must stay stateless, otherwise stale IDs
+        # keep appearing even after tracking is turned off.
         return self._parse_results(results, frame, with_ids=False)
 
     def track(self, frame: np.ndarray) -> list[Detection]:
         """
-        `detect()` jaisa hi, lekin har object ko ek **persistent track ID** milti hai
-        jo frames ke darmiyan same rehti hai.
+        Same as `detect()`, but each object also gets a **persistent track ID**
+        that stays the same from frame to frame.
 
-        Isi wajah se "target lock" mumkin hota hai: aap ek ID pakad lete hain
-        aur wo object jab tak frame mein hai, usi ID se pehchana jaata hai —
-        chahe wo hile, doosron ke peeche chhup jaye, ya thodi der ke liye ghayab ho.
+        That is what makes target lock possible: you hold on to one ID, and the
+        object keeps that identity for as long as it is in frame — even as it
+        moves, hides behind something, or briefly disappears.
 
-        persist=True ka matlab: Ultralytics tracker ki state calls ke darmiyan
-        yaad rakhta hai (isliye har frame par nayi IDs nahi banti).
+        persist=True tells Ultralytics to keep the tracker's state between
+        calls, so new IDs are not minted on every frame.
         """
         results = self.model.track(
             source=frame,
@@ -166,8 +166,8 @@ class Detector:
 
     def reset_tracker(self) -> None:
         """
-        Tracker ki state saaf karo (IDs 1 se dobara shuru).
-        Naya video/stream shuru karte waqt call karein.
+        Clear the tracker's state so IDs restart from 1.
+        Call this when starting a new video or stream.
         """
         for predictor_attr in ("predictor",):
             predictor = getattr(self.model, predictor_attr, None)
@@ -176,7 +176,7 @@ class Detector:
                     tracker.reset()
 
     def _parse_results(self, results, frame: np.ndarray, with_ids: bool = True) -> list[Detection]:
-        """Ultralytics ke raw output ko humare Detection objects mein badlo."""
+        """Convert Ultralytics' raw output into our own Detection objects."""
         detections: list[Detection] = []
         if not results:
             return detections
@@ -190,14 +190,14 @@ class Detector:
         confs = boxes.conf.cpu().numpy()
         classes = boxes.cls.cpu().numpy().astype(int)
 
-        # Tracking mode mein boxes.id mojood hoti hai; detect mode mein None
+        # boxes.id exists in tracking mode and is None in detection mode
         if with_ids and boxes.id is not None:
             track_ids = boxes.id.cpu().numpy().astype(int).tolist()
         else:
             track_ids = [None] * len(xyxy)
 
         for (x1, y1, x2, y2), conf, cls_id, track_id in zip(xyxy, confs, classes, track_ids):
-            # Box ko frame ke andar clamp karo (kabhi kabhi model bahar nikal jaata hai)
+            # Clamp the box to the frame — the model occasionally spills outside
             x1 = int(max(0, min(w - 1, x1)))
             y1 = int(max(0, min(h - 1, y1)))
             x2 = int(max(0, min(w - 1, x2)))
@@ -227,10 +227,10 @@ class Detector:
         dim_ids: set[int] | None = None,
     ) -> np.ndarray:
         """
-        Frame par bounding boxes + labels draw karo (in-place, wohi frame return hota hai).
+        Draw bounding boxes and labels on the frame, in place, and return it.
 
-        dim_ids: in track IDs ko halka (faded) draw karo — target lock mode mein
-        baaki objects ko dim kar ke locked target ko numaya karne ke liye.
+        dim_ids: draw these track IDs faded. Target-lock mode uses this to dim
+        everything except the locked target.
         """
         if show_confidence is None:
             show_confidence = config.SHOW_CONFIDENCE
@@ -245,7 +245,7 @@ class Detector:
 
             dimmed = dim_ids is not None and det.track_id in dim_ids
             if dimmed:
-                # Faded color + patli line — nazar locked target par rahe
+                # Faded colour and a thinner line, so the eye stays on the target
                 color = tuple(int(c * 0.35 + 60) for c in color)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
             else:
@@ -253,10 +253,10 @@ class Detector:
 
             text = f"{det.label} {det.confidence * 100:.0f}%" if show_confidence else det.label
             if det.track_id is not None:
-                text = f"#{det.track_id} {text}"  # ID sabse pehle — pehchanne mein aasan
+                text = f"#{det.track_id} {text}"  # ID first — easiest to spot
             (tw, th), baseline = cv2.getTextSize(text, font, scale, 1)
 
-            # Label ka background: box ke upar, lekin agar upar jagah na ho to box ke andar
+            # Label background sits above the box, or inside it when there is no room
             label_bottom = y1 if y1 - th - baseline - 4 >= 0 else y2 + th + baseline + 4
             label_top = label_bottom - th - baseline - 4
 
@@ -276,7 +276,7 @@ class Detector:
 
 
 def _contrast_color(bgr: tuple[int, int, int]) -> tuple[int, int, int]:
-    """Background color ke hisaab se text kaala ya safed choose karo."""
+    """Pick black or white text depending on the background's luminance."""
     b, g, r = bgr
     luminance = 0.299 * r + 0.587 * g + 0.114 * b
     return (0, 0, 0) if luminance > 140 else (255, 255, 255)
@@ -284,8 +284,8 @@ def _contrast_color(bgr: tuple[int, int, int]) -> tuple[int, int, int]:
 
 def count_by_label(detections: list[Detection]) -> dict[str, int]:
     """
-    Detections ko label ke hisaab se count karo, sabse zyada wala pehle.
-    Overlay panel aur reporting dono isko use karte hain.
+    Count detections per label, most frequent first.
+    Used by both the overlay panel and reporting.
     """
     counts: dict[str, int] = {}
     for det in detections:

@@ -1,8 +1,8 @@
 """
-fps_counter.py — FPS (frames per second) calculate karne ka simple helper.
+fps_counter.py — A small helper for measuring frames per second.
 
-Har frame ka time note karte hain aur last N frames ka moving average
-nikalte hain — isse number jhatke nahi khaata aur padhne mein aasan rehta hai.
+Each frame's duration is recorded and a moving average over the last N frames
+is reported, so the number stays steady instead of jumping around.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ class FPSCounter:
     Usage:
         fps = FPSCounter()
         while True:
-            ...frame process karo...
+            ...process a frame...
             fps.update()
             print(fps.value)
     """
@@ -31,7 +31,7 @@ class FPSCounter:
         self.frame_count = 0
 
     def update(self) -> float:
-        """Ek frame complete hone par call karein. Current FPS return karta hai."""
+        """Call once per completed frame. Returns the current FPS."""
         now = time.perf_counter()
         if self._last_tick is not None:
             self._durations.append(now - self._last_tick)
@@ -41,7 +41,7 @@ class FPSCounter:
 
     @property
     def value(self) -> float:
-        """Moving-average FPS. Shuru mein (data kam ho to) 0.0 return karta hai."""
+        """Moving-average FPS. Returns 0.0 until enough samples are collected."""
         if not self._durations:
             return 0.0
         avg = sum(self._durations) / len(self._durations)
@@ -49,16 +49,16 @@ class FPSCounter:
 
     @property
     def average(self) -> float:
-        """Poore session ka overall average FPS."""
+        """Overall average FPS for the whole session."""
         elapsed = time.perf_counter() - self._start
         return self.frame_count / elapsed if elapsed > 0 else 0.0
 
     @property
     def elapsed(self) -> float:
-        """Session ko shuru hue kitne seconds ho gaye."""
+        """Seconds since the session started."""
         return time.perf_counter() - self._start
 
     def reset(self) -> None:
-        """Pause ke baad resume karte waqt useful — stale timings hata deta hai."""
+        """Drop stale timings — useful when resuming after a pause."""
         self._durations.clear()
         self._last_tick = None

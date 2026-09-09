@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-test_smoke.py — Quick self-test: sab kuch sahi install aur wire hua hai ya nahi.
+test_smoke.py — A quick self-test that everything is installed and wired up.
 
-Chalayein:
+Run it with:
     python test_smoke.py
 
-Ye webcam ki zaroorat nahi rakhta — synthetic frames aur (agar mojood ho)
-sample.jpg par test karta hai.
+No webcam is required: the tests use synthetic frames and, when it is present,
+sample.jpg.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ FAILED = 0
 
 
 def check(name: str, fn) -> None:
-    """Ek test chalao aur PASS/FAIL print karo (exception se poora run na ruke)."""
+    """Run one test and print PASS/FAIL, so an exception cannot abort the run."""
     global PASSED, FAILED
     try:
         detail = fn()
@@ -49,8 +49,8 @@ def test_imports() -> str:
 def test_config() -> str:
     import config
 
-    assert 0 < config.CONFIDENCE_THRESHOLD < 1, "confidence 0-1 ke beech honi chahiye"
-    assert config.IMAGE_SIZE % 32 == 0, "image size 32 ka multiple hona chahiye"
+    assert 0 < config.CONFIDENCE_THRESHOLD < 1, "confidence must be between 0 and 1"
+    assert config.IMAGE_SIZE % 32 == 0, "image size must be a multiple of 32"
     return f"model={config.MODEL_NAME}, conf={config.CONFIDENCE_THRESHOLD}"
 
 
@@ -64,10 +64,10 @@ def test_fps_counter() -> str:
         time.sleep(0.01)
         fps.update()
 
-    assert fps.frame_count == 6, "frame count galat"
-    assert fps.value > 0, "FPS zero nahi hona chahiye"
+    assert fps.frame_count == 6, "wrong frame count"
+    assert fps.value > 0, "FPS should not be zero"
     fps.reset()
-    assert fps.value == 0.0, "reset ke baad FPS 0 hona chahiye"
+    assert fps.value == 0.0, "FPS should be 0 after a reset"
     return f"{fps.average:.0f} FPS avg"
 
 
@@ -75,9 +75,9 @@ def test_model_load() -> str:
     from detector.detect import Detector
 
     detector = Detector()
-    assert len(detector.class_names) == 80, "COCO model mein 80 classes honi chahiye"
+    assert len(detector.class_names) == 80, "a COCO model should have 80 classes"
     assert "person" in detector.class_names
-    globals()["_DETECTOR"] = detector  # aage ke tests reuse karenge
+    globals()["_DETECTOR"] = detector  # reused by the later tests
     return f"{len(detector.class_names)} classes on {detector.device}"
 
 
@@ -85,7 +85,7 @@ def test_detect_synthetic() -> str:
     import numpy as np
 
     detector = globals()["_DETECTOR"]
-    # Blank frame — crash nahi hona chahiye, bas 0 detections
+    # A blank frame must not crash — it should simply yield 0 detections
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     detections = detector.detect(frame)
     detector.draw(frame, detections)
@@ -97,7 +97,7 @@ def test_detect_sample() -> str:
 
     sample = ROOT / "sample.jpg"
     if not sample.exists():
-        return "skipped (sample.jpg mojood nahi)"
+        return "skipped (sample.jpg not present)"
 
     from detector.detect import count_by_label
 
@@ -106,8 +106,8 @@ def test_detect_sample() -> str:
     detections = detector.detect(frame)
     counts = count_by_label(detections)
 
-    assert detections, "sample.jpg par kuch to detect hona chahiye tha"
-    assert all(0 <= d.confidence <= 1 for d in detections), "confidence 0-1 se bahar"
+    assert detections, "sample.jpg should have produced some detections"
+    assert all(0 <= d.confidence <= 1 for d in detections), "confidence outside 0-1"
     for d in detections:
         x1, y1, x2, y2 = d.box
         assert x1 < x2 and y1 < y2, f"invalid box: {d.box}"
@@ -122,11 +122,37 @@ def test_class_filter() -> str:
     assert ids == [0, 2], f"expected [0, 2], got {ids}"
 
     try:
-        class_name_to_id(detector.model, ["bandar"])
-        raise AssertionError("galat class name par error aana chahiye tha")
+        class_name_to_id(detector.model, ["unicorn"])
+        raise AssertionError("an invalid class name should have raised")
     except ValueError:
         pass
     return "person=0, car=2; unknown class rejected"
+
+
+def test_class_groups() -> str:
+    """Group shortcuts such as `--classes animals` should expand."""
+    import config
+    from detector.model_loader import class_name_to_id, expand_class_groups
+
+    assert "dog" in expand_class_groups(["animals"]), "animals should include dog"
+    assert expand_class_groups(["person"]) == ["person"], "a plain class must pass through"
+
+    # Groups mixed with plain classes, and duplicates collapsed
+    mixed = expand_class_groups(["person", "pets", "dog"])
+    assert mixed[0] == "person" and mixed.count("dog") == 1, mixed
+
+    detector = globals()["_DETECTOR"]
+    ids = class_name_to_id(detector.model, ["animals"])
+    assert len(ids) == len(config.CLASS_GROUPS["animals"]), f"got {len(ids)} IDs"
+    assert len(set(ids)) == len(ids), "IDs should not repeat"
+
+    try:
+        class_name_to_id(detector.model, ["no_such_class"])
+        raise AssertionError("an unknown class should have raised ValueError")
+    except ValueError as exc:
+        assert "Groups:" in str(exc), "the error should mention the groups"
+
+    return f"{len(config.CLASS_GROUPS)} groups; animals -> {len(ids)} classes"
 
 
 def test_overlay() -> str:
@@ -137,7 +163,7 @@ def test_overlay() -> str:
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     draw_overlay(frame, 24.5, {"person": 3, "car": 1}, 0.5, paused=True)
     draw_help_bar(frame, "q quit")
-    assert frame.any(), "overlay ne kuch draw nahi kiya"
+    assert frame.any(), "the overlay drew nothing"
     return "panel + help bar drawn"
 
 
@@ -152,24 +178,24 @@ def test_save_output() -> str:
         frame = np.full((240, 320, 3), 120, dtype=np.uint8)
 
         shot = save_screenshot(frame, prefix="test", directory=tmp_path)
-        assert shot.exists() and shot.stat().st_size > 0, "screenshot khali hai"
+        assert shot.exists() and shot.stat().st_size > 0, "the screenshot is empty"
 
         with VideoWriter(tmp_path / "test.mp4", fps=15, frame_size=(320, 240)) as writer:
             for _ in range(5):
                 writer.write(frame)
-        assert (tmp_path / "test.mp4").stat().st_size > 0, "video khali hai"
+        assert (tmp_path / "test.mp4").stat().st_size > 0, "the video is empty"
 
         det = Detection(class_id=0, label="person", confidence=0.9, box=(1, 2, 3, 4))
         with DetectionLogger(tmp_path / "log.csv") as log:
             log.log(0, [det, det])
         lines = (tmp_path / "log.csv").read_text().strip().splitlines()
-        assert len(lines) == 3, f"CSV mein header + 2 rows chahiye, mile {len(lines)}"
+        assert len(lines) == 3, f"expected a header plus 2 rows, got {len(lines)}"
 
-    return "screenshot, video, CSV — teeno OK"
+    return "screenshot, video and CSV all OK"
 
 
 def test_browser_transcode() -> str:
-    """Streamlit ke player ke liye H.264 version banta hai (ffmpeg ho to)."""
+    """An H.264 version is produced for the Streamlit player (when ffmpeg exists)."""
     import shutil
 
     import cv2
@@ -178,7 +204,7 @@ def test_browser_transcode() -> str:
     from utils.save_output import VideoWriter, transcode_for_browser
 
     if shutil.which("ffmpeg") is None:
-        return "skipped (ffmpeg installed nahi — download phir bhi chalta hai)"
+        return "skipped (ffmpeg not installed — downloads still work)"
 
     with tempfile.TemporaryDirectory() as tmp:
         source = Path(tmp) / "clip.mp4"
@@ -188,15 +214,15 @@ def test_browser_transcode() -> str:
                 writer.write(frame)
 
         out = transcode_for_browser(source)
-        assert out is not None and out.exists(), "H.264 file nahi bani"
-        assert out.stat().st_size > 0, "H.264 file khali hai"
+        assert out is not None and out.exists(), "no H.264 file was produced"
+        assert out.stat().st_size > 0, "the H.264 file is empty"
 
-        # Padh bhi sakein — warna browser mein bhi nahi chalegi
+        # It must also be readable, otherwise the browser cannot play it either
         cap = cv2.VideoCapture(str(out))
-        assert cap.isOpened(), "H.264 video open nahi hui"
+        assert cap.isOpened(), "the H.264 video would not open"
         ok, _ = cap.read()
         cap.release()
-        assert ok, "H.264 video se frame nahi mila"
+        assert ok, "no frame could be read from the H.264 video"
 
     return "mp4v -> H.264 (browser-playable)"
 
@@ -217,7 +243,7 @@ def test_video_pipeline() -> str:
         writer.release()
 
         cap = cv2.VideoCapture(str(path))
-        assert cap.isOpened(), "test video open nahi hui"
+        assert cap.isOpened(), "the test video would not open"
         frames = 0
         while True:
             ok, frame = cap.read()
@@ -227,7 +253,7 @@ def test_video_pipeline() -> str:
             frames += 1
         cap.release()
 
-    assert frames == 5, f"5 frames expected, {frames} mile"
+    assert frames == 5, f"expected 5 frames, got {frames}"
     return f"{frames} frames processed"
 
 
@@ -243,15 +269,15 @@ def test_cli_parsing() -> str:
         assert resolve_source(str(sample))[1] == "image"
 
     try:
-        resolve_source("nahi_hai.mp4")
-        raise AssertionError("missing file par error aana chahiye tha")
+        resolve_source("does_not_exist.mp4")
+        raise AssertionError("a missing file should have raised")
     except FileNotFoundError:
         pass
     return "flags, source resolution, missing-file error"
 
 
 def test_stream_urls() -> str:
-    """Phone camera / CCTV URLs 'stream' ke tor par pehchane jaane chahiyein."""
+    """Phone camera and CCTV URLs must be recognised as streams."""
     from main import resolve_source
     from utils.cameras import mask_credentials
 
@@ -263,43 +289,17 @@ def test_stream_urls() -> str:
     ]
     for url in urls:
         src, kind = resolve_source(url)
-        assert kind == "stream", f"{url} -> {kind} (stream hona chahiye tha)"
-        assert src == url, "URL badalna nahi chahiye"
+        assert kind == "stream", f"{url} -> {kind} (should have been a stream)"
+        assert src == url, "the URL must not be altered"
 
     masked = mask_credentials("rtsp://admin:pass123@192.168.1.10:554/stream1")
-    assert "pass123" not in masked, "password logs mein leak ho raha hai"
-    assert "admin" in masked, "username dikhna chahiye"
+    assert "pass123" not in masked, "the password is leaking into the logs"
+    assert "admin" in masked, "the username should stay visible"
     return f"{len(urls)} URL formats + password masking"
 
 
-def test_class_groups() -> str:
-    """`--classes animals` jaise group shortcuts khulne chahiyein."""
-    import config
-    from detector.model_loader import class_name_to_id, expand_class_groups
-
-    assert "dog" in expand_class_groups(["animals"]), "animals mein dog hona chahiye"
-    assert expand_class_groups(["person"]) == ["person"], "aam class waisi hi rehni chahiye"
-
-    # Group + aam class mila kar, aur duplicates ek hi baar
-    mixed = expand_class_groups(["person", "pets", "dog"])
-    assert mixed[0] == "person" and mixed.count("dog") == 1, mixed
-
-    detector = globals()["_DETECTOR"]
-    ids = class_name_to_id(detector.model, ["animals"])
-    assert len(ids) == len(config.CLASS_GROUPS["animals"]), f"{len(ids)} IDs mile"
-    assert len(set(ids)) == len(ids), "duplicate IDs nahi honi chahiyein"
-
-    try:
-        class_name_to_id(detector.model, ["aisi_koi_class_nahi"])
-        raise AssertionError("unknown class par ValueError aani chahiye thi")
-    except ValueError as exc:
-        assert "Groups:" in str(exc), "error mein groups ka zikr hona chahiye"
-
-    return f"{len(config.CLASS_GROUPS)} groups; animals -> {len(ids)} classes"
-
-
 def test_camera_profiles() -> str:
-    """cameras.json save/load, naam se source resolve, aur brand URL builder."""
+    """cameras.json save/load, resolving a source by name, and the URL builder."""
     import config
     import main
     from utils.cameras import build_url, delete_camera, load_cameras, save_camera
@@ -311,46 +311,46 @@ def test_camera_profiles() -> str:
         save_camera("laptop", "0", kind="usb", path=store)
         cams = load_cameras(store)
         assert set(cams) == {"phone", "laptop"}, f"saved cameras: {set(cams)}"
-        assert cams["phone"].note == "test", "note save nahi hua"
+        assert cams["phone"].note == "test", "the note was not saved"
 
-        # `--source phone` ko saved camera se resolve hona chahiye
+        # `--source phone` should resolve through the saved camera
         original = config.CAMERAS_FILE
         config.CAMERAS_FILE = store
         try:
             assert main.resolve_source("phone") == ("http://192.168.1.5:8080/video", "stream")
-            assert main.resolve_source("laptop") == (0, "webcam"), "USB entry int banni chahiye"
+            assert main.resolve_source("laptop") == (0, "webcam"), "a USB entry should become an int"
             try:
-                main.resolve_source("aisa_koi_camera_nahi")
-                raise AssertionError("unknown camera par error aana chahiye tha")
+                main.resolve_source("no_such_camera")
+                raise AssertionError("an unknown camera should have raised")
             except FileNotFoundError:
                 pass
         finally:
             config.CAMERAS_FILE = original
 
-        assert delete_camera("phone", path=store), "delete fail"
+        assert delete_camera("phone", path=store), "delete failed"
         assert set(load_cameras(store)) == {"laptop"}
 
-    # Brand se URL banana — password URL-encode hona chahiye (@ -> %40)
+    # Building a URL from a brand — the password must be URL-encoded (@ -> %40)
     url = build_url("tplink", "192.168.1.10", user="admin", password="pa@ss", quality="sub")
     assert url == "rtsp://admin:pa%40ss@192.168.1.10:554/stream2", url
     assert build_url("ip-webcam", "192.168.1.5") == "http://192.168.1.5:8080/video"
     assert "Channels/101" in build_url("hikvision", "1.2.3.4", quality="main")
     try:
-        build_url("nokia3310", "1.2.3.4")
-        raise AssertionError("unknown brand par ValueError aani chahiye thi")
+        build_url("no_such_brand", "1.2.3.4")
+        raise AssertionError("an unknown brand should have raised ValueError")
     except ValueError:
         pass
 
-    return "save/load/delete, name resolve, brand URL builder"
+    return "save/load/delete, name resolution, brand URL builder"
 
 
 def test_tracking() -> str:
-    """Track IDs frames ke darmiyan persist honi chahiyein."""
+    """Track IDs must persist from frame to frame."""
     import cv2
 
     sample = ROOT / "sample.jpg"
     if not sample.exists():
-        return "skipped (sample.jpg mojood nahi)"
+        return "skipped (sample.jpg not present)"
 
     detector = globals()["_DETECTOR"]
     detector.reset_tracker()
@@ -358,17 +358,17 @@ def test_tracking() -> str:
 
     ids_per_frame = []
     for shift in range(4):
-        # Halka sa pan — objects hilein taake tracker ka kaam real ho
+        # A slight pan, so objects move and the tracker has real work to do
         moved = frame[:, shift * 5 : frame.shape[1] - 40 + shift * 5]
         dets = detector.track(moved)
-        assert all(d.track_id is not None for d in dets), "track mode mein IDs milni chahiyein"
+        assert all(d.track_id is not None for d in dets), "track mode should assign IDs"
         ids_per_frame.append({d.track_id for d in dets})
 
     persistent = set.intersection(*ids_per_frame) if ids_per_frame else set()
-    assert persistent, f"koi ID frames ke darmiyan persist nahi hui: {ids_per_frame}"
+    assert persistent, f"no ID persisted across frames: {ids_per_frame}"
 
-    # detect() mode mein IDs nahi honi chahiyein
-    assert all(d.track_id is None for d in detector.detect(frame)), "detect() mein ID nahi honi chahiye"
+    # detect() mode must not carry IDs
+    assert all(d.track_id is None for d in detector.detect(frame)), "detect() must not assign IDs"
     return f"{len(persistent)} IDs persisted across 4 frames"
 
 
@@ -377,34 +377,34 @@ def test_target_lock() -> str:
     from detector.target_lock import TargetLock
 
     lock = TargetLock(trail_length=5, lost_after=3)
-    assert not lock.is_active, "shuru mein lock nahi hona chahiye"
+    assert not lock.is_active, "nothing should be locked initially"
 
     a = Detection(0, "person", 0.9, (10, 10, 50, 90), track_id=1)
     b = Detection(2, "car", 0.8, (100, 100, 200, 180), track_id=2)
 
-    # Click se lock — chhota (zyada specific) object chunna chahiye
+    # Click to lock — the smaller (more specific) object should win
     hit = lock.lock_at_point([a, b], 30, 50)
-    assert hit is not None and lock.track_id == 1, "click par person lock hona chahiye tha"
+    assert hit is not None and lock.track_id == 1, "the click should have locked the person"
 
-    # Point kisi box ke andar nahi
+    # A point inside no box at all
     lock.clear()
-    assert lock.lock_at_point([a, b], 500, 500) is None, "khali jagah par lock nahi hona chahiye"
+    assert lock.lock_at_point([a, b], 500, 500) is None, "empty space must not lock"
 
-    # Class ke naam se auto-lock
+    # Auto-lock by class name
     assert lock.lock_first([a, b], "car") is not None and lock.track_id == 2
 
-    # Target dikhne par trail barhni chahiye
+    # While the target is visible, the trail should grow
     lock.lock(1)
     for _ in range(3):
         assert lock.update([a, b]) is not None
     assert len(lock.trail) == 3 and not lock.is_lost
 
-    # Target ghayab -> LOST, phir wapas aane par dobara pakad le
+    # Target disappears -> LOST, then it is re-acquired when it returns
     for _ in range(4):
         assert lock.update([b]) is None
-    assert lock.is_lost and lock.is_stale, "4 frames ghayab ke baad stale hona chahiye"
-    assert lock.update([a, b]) is not None, "wapas aane par dobara pakadna chahiye"
-    assert not lock.is_lost, "re-acquire ke baad LOST nahi hona chahiye"
+    assert lock.is_lost and lock.is_stale, "should be stale after 4 missing frames"
+    assert lock.update([a, b]) is not None, "it should be re-acquired on return"
+    assert not lock.is_lost, "it must not still read LOST after re-acquisition"
 
     return "click-lock, auto-lock, trail, lost + re-acquire"
 
@@ -421,13 +421,13 @@ def test_lock_drawing() -> str:
     lock.lock(7, "bird")
     lock.update([target])
     lock.draw(frame, target)
-    assert frame.any(), "lock HUD draw nahi hua"
+    assert frame.any(), "the lock HUD was not drawn"
 
-    # LOST banner bhi crash nahi karna chahiye
+    # The LOST banner must not crash either
     blank = np.zeros((240, 320, 3), dtype=np.uint8)
     lock.update([])
     lock.draw(blank, None)
-    assert blank.any(), "LOST banner draw nahi hua"
+    assert blank.any(), "the LOST banner was not drawn"
     return "lock HUD + lost banner"
 
 
@@ -457,7 +457,7 @@ TESTS = [
 
 def main() -> int:
     print("\n" + "=" * 52)
-    print("  YOLO Detection — Smoke Test")
+    print("  EyeSpot — Smoke Test")
     print("=" * 52 + "\n")
 
     for name, fn in TESTS:
@@ -468,7 +468,7 @@ def main() -> int:
     print("-" * 52 + "\n")
 
     if FAILED == 0:
-        print("Sab theek hai! Ab chalayein:  python main.py\n")
+        print("All good. Now run:  python main.py\n")
     return 1 if FAILED else 0
 
 

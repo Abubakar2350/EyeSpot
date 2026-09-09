@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-main.py — Entry point. Webcam ya video file par real-time YOLO detection chalata hai.
+main.py — Entry point. Runs real-time YOLO detection on a camera or video file.
 
 Examples:
     python main.py                              # default webcam
-    python main.py --source 1                   # doosra camera
+    python main.py --source 1                   # second camera
     python main.py --source video.mp4           # video file
     python main.py --source pic.jpg             # single image
-    python main.py --source video.mp4 --save    # output video save karo
-    python main.py --classes person car         # sirf ye classes
+    python main.py --source video.mp4 --save    # save the annotated video
+    python main.py --classes person car         # only these classes
     python main.py --conf 0.35 --model yolov8s.pt
     python main.py --source video.mp4 --no-display --save   # headless batch
 
@@ -16,22 +16,22 @@ Phone camera / CCTV (network stream):
     python main.py --source http://192.168.1.5:8080/video     # phone (IP Webcam app)
     python main.py --source rtsp://user:pass@192.168.1.10:554/stream1   # CCTV
 
-Saved cameras (poora URL baar baar type na karna pade):
+Saved cameras (so the full URL need not be retyped):
     python main.py --source http://192.168.1.5:8080/video --save-camera phone
-    python main.py --camera phone               # ab sirf naam kaafi hai
-    python main.py --list-cameras               # saari saved cameras dekhein
+    python main.py --camera phone               # the name is now enough
+    python main.py --list-cameras               # show every saved camera
 
-Tracking aur target lock:
-    python main.py --track                      # har object ko persistent ID do
-    python main.py --track --lock person        # pehle person par khud lock karo
-    python main.py --track --lock bird          # kisi parinde ko follow karo
-    python main.py --track --lock-id 3          # jis ki track ID 3 hai
+Tracking and target lock:
+    python main.py --track                      # give every object a persistent ID
+    python main.py --track --lock person        # lock onto the first person seen
+    python main.py --track --lock bird          # follow a bird
+    python main.py --track --lock-id 3          # lock onto track ID 3
 
-Keyboard (video window mein):
+Keyboard (in the video window):
     q / Esc  quit        s  screenshot        p / Space  pause-resume
     o        overlay on/off                   + / -      confidence up/down
-    t        tracking on/off                  click      us object par lock karo
-    l        auto-lock                        c          lock hatao
+    t        tracking on/off                  click      lock onto that object
+    l        auto-lock                        c          clear the lock
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ STREAM_PREFIXES = ("rtsp://", "rtmp://", "http://", "https://", "udp://", "tcp:/
 
 HELP_BAR = "q quit | s shot | p pause | o overlay | +/- conf | t track | click lock | c clear"
 
-logger = logging.getLogger("yolo")
+logger = logging.getLogger("eyespot")
 
 
 # ---------------------------------------------------------------------------
@@ -84,24 +84,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--source",
         default=str(config.CAMERA_INDEX),
         help=(
-            "Camera index (0, 1, ...), video/image file path, ya network stream URL "
-            "(rtsp:// CCTV, http:// phone camera). Default: 0"
+            "Camera index (0, 1, ...), a video/image file path, or a network stream "
+            "URL (rtsp:// for CCTV, http:// for a phone camera). Default: 0"
         ),
     )
     # -- saved camera profiles (cameras.json) --
     parser.add_argument(
         "--camera", metavar="NAME", default=None,
-        help="Saved camera ka naam use karo (cameras.json). --source ko override karta hai.",
+        help="Use a saved camera by name (cameras.json). Overrides --source.",
     )
     parser.add_argument(
         "--save-camera", metavar="NAME", default=None,
-        help="Mojooda --source ko is naam se cameras.json mein save kar do",
+        help="Save the current --source under this name in cameras.json",
     )
     parser.add_argument(
         "--camera-note", metavar="TEXT", default="",
-        help="--save-camera ke sath ek chhota note (e.g. 'front gate')",
+        help="An optional note to store with --save-camera (e.g. 'front gate')",
     )
-    parser.add_argument("--list-cameras", action="store_true", help="Saari saved cameras dikhao aur exit")
+    parser.add_argument("--list-cameras", action="store_true", help="List every saved camera and exit")
 
     parser.add_argument("--model", default=config.MODEL_NAME, help="YOLO weights (default: yolov8n.pt)")
     parser.add_argument("--device", default=config.DEVICE, help="cpu / cuda / mps (default: auto)")
@@ -120,39 +120,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--classes", nargs="*", default=None, metavar="NAME",
         help=(
-            "Sirf ye classes detect karo, e.g. --classes person car. "
-            f"Groups bhi chalte hain: {', '.join(sorted(config.CLASS_GROUPS))}"
+            "Detect only these classes, e.g. --classes person car. "
+            f"Groups also work: {', '.join(sorted(config.CLASS_GROUPS))}"
         ),
     )
     # -- tracking / target lock --
     parser.add_argument(
         "--track", action="store_true",
-        help="Tracking on karo — har object ko persistent ID milegi (lock ke liye zaroori)",
+        help="Enable tracking — every object gets a persistent ID (required for locking)",
     )
     parser.add_argument(
         "--tracker", default=config.TRACKER, choices=["bytetrack.yaml", "botsort.yaml"],
-        help="bytetrack = tez, botsort = behtar re-identification",
+        help="bytetrack = faster, botsort = better re-identification",
     )
     parser.add_argument(
         "--lock", metavar="CLASS", default=None,
-        help='Is class ke pehle object par khud lock karo, e.g. --lock person / --lock bird',
+        help="Automatically lock onto the first object of this class, e.g. --lock person",
     )
     parser.add_argument(
         "--lock-id", type=int, default=None, metavar="ID",
-        help="Is track ID par lock karo (e.g. --lock-id 3)",
+        help="Lock onto this track ID (e.g. --lock-id 3)",
     )
 
-    parser.add_argument("--save", action="store_true", help="Annotated video/image save karo")
-    parser.add_argument("--log", action="store_true", help="Detections ko CSV mein log karo")
+    parser.add_argument("--save", action="store_true", help="Save the annotated video/image")
+    parser.add_argument("--log", action="store_true", help="Write detections to a CSV log")
     parser.add_argument(
         "--output-dir", default=None,
-        help=f"Kahan save karna hai (default: {config.OUTPUT_DIR})",
+        help=f"Where to save output (default: {config.OUTPUT_DIR})",
     )
     parser.add_argument(
         "--no-display", action="store_true",
-        help="Window mat kholo (headless server / batch processing ke liye)",
+        help="Do not open a window (for headless servers and batch processing)",
     )
-    parser.add_argument("--list-classes", action="store_true", help="Model ki saari classes print kar ke exit")
+    parser.add_argument("--list-classes", action="store_true", help="Print every class the model knows and exit")
     parser.add_argument("--verbose", "-v", action="store_true", help="Detailed logs")
     return parser.parse_args(argv)
 
@@ -163,9 +163,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _lookup_camera(name: str):
     """
-    Saved camera dhoondo (cameras.json). Store corrupt ho to crash nahi karte —
-    warning de kar aage barh jaate hain, kyunke ho sakta hai user ne file path
-    diya ho aur camera store ka is se koi taalluq hi na ho.
+    Look up a saved camera (cameras.json). A corrupt store must not crash the
+    run — we log a warning and move on, since the user may well have passed a
+    file path that has nothing to do with the camera store.
     """
     try:
         return get_camera(name)
@@ -176,16 +176,16 @@ def _lookup_camera(name: str):
 
 def resolve_source(source: str, _follow_camera: bool = True) -> tuple[int | str, str]:
     """
-    User ke --source ko (opencv_source, kind) mein badlo.
+    Turn the user's --source into an (opencv_source, kind) pair.
     kind = "webcam" | "stream" | "video" | "image"
 
-    File path aur URL ke ilawa `cameras.json` mein saved camera ka naam bhi
-    chalta hai (e.g. --source phone).
+    Besides file paths and URLs, the name of a camera saved in `cameras.json`
+    also works (e.g. --source phone).
     """
     if source.isdigit():
         return int(source), "webcam"
 
-    # Network stream: phone camera app, IP camera, ya CCTV (RTSP)
+    # Network stream: phone camera app, IP camera, or CCTV (RTSP)
     if source.lower().startswith(STREAM_PREFIXES):
         return source, "stream"
 
@@ -195,36 +195,36 @@ def resolve_source(source: str, _follow_camera: bool = True) -> tuple[int | str,
             return str(path), "image"
         return str(path), "video"
 
-    # Na file hai na URL — shayad kisi saved camera ka naam ho
+    # Neither a file nor a URL — it may be the name of a saved camera
     if _follow_camera:
         profile = _lookup_camera(source)
-        # `_follow_camera=False`: saved URL dobara naam ki tarah resolve na ho
-        # (warna "phone" -> "phone" wali entry infinite loop bana deti)
+        # `_follow_camera=False` stops the saved URL from being resolved as a
+        # name again; otherwise an entry pointing at itself would loop forever.
         if profile is not None:
             return resolve_source(profile.url, _follow_camera=False)
 
     raise FileNotFoundError(
-        f"Source samajh nahi aaya: {source}\n"
-        "- Webcam ke liye number dein (e.g. --source 0)\n"
-        "- File ke liye sahi path dein\n"
-        "- Phone/CCTV ke liye poora URL dein (rtsp://... ya http://...)\n"
-        "- Saved camera ka naam dein — dekhne ke liye: python main.py --list-cameras"
+        f"Could not make sense of the source: {source}\n"
+        "- For a webcam, pass a number (e.g. --source 0)\n"
+        "- For a file, pass a valid path\n"
+        "- For a phone or CCTV, pass the full URL (rtsp://... or http://...)\n"
+        "- For a saved camera, pass its name — list them with: python main.py --list-cameras"
     )
 
 
 def open_capture(source: int | str, kind: str) -> cv2.VideoCapture:
-    """VideoCapture kholo aur saaf error do agar na khule."""
+    """Open a VideoCapture, raising a clear error if it fails."""
     if kind == "stream":
-        # FFMPEG backend network streams ke liye sabse reliable hai
+        # The FFMPEG backend is the most reliable one for network streams
         cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
-        # Buffer chhota rakho warna latency barhti jaati hai (frames jama ho kar
-        # video "peechhe" reh jaati hai — CCTV par ye bohot mehsoos hota hai)
+        # Keep the buffer small, otherwise latency grows as frames pile up and
+        # the video falls behind — very noticeable on CCTV feeds
         cap.set(cv2.CAP_PROP_BUFFERSIZE, config.STREAM_BUFFER_SIZE)
     else:
         cap = cv2.VideoCapture(source)
 
     if kind == "webcam":
-        # Ye sirf requests hain — camera support kare to apply hongi
+        # These are only requests; they apply if the camera supports them
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
 
@@ -232,34 +232,34 @@ def open_capture(source: int | str, kind: str) -> cv2.VideoCapture:
         cap.release()
         if kind == "webcam":
             raise RuntimeError(
-                f"Webcam (index {source}) open nahi ho saka.\n"
-                "- Check karein ke camera connected hai aur koi doosri app use to nahi kar rahi\n"
-                "- Doosra index try karein: --source 1\n"
-                "- Linux par `ls /dev/video*` se available cameras dekhein"
+                f"Could not open the webcam (index {source}).\n"
+                "- Check that the camera is connected and no other app is using it\n"
+                "- Try another index: --source 1\n"
+                "- On Linux, list available cameras with `ls /dev/video*`"
             )
         if kind == "stream":
             raise RuntimeError(
-                f"Stream connect nahi ho saka: {mask_credentials(source)}\n"
-                "- URL browser/VLC mein test karein (VLC: Media > Open Network Stream)\n"
-                "- Phone aur PC same Wi-Fi par hone chahiye\n"
-                "- RTSP par username/password sahi hain? Special characters ko URL-encode karein\n"
-                "- Firewall ya camera ka 'RTSP enabled' setting check karein"
+                f"Could not connect to the stream: {mask_credentials(source)}\n"
+                "- Test the URL in a browser or VLC (Media > Open Network Stream)\n"
+                "- The phone and the PC must be on the same Wi-Fi network\n"
+                "- For RTSP, check the username and password; URL-encode special characters\n"
+                "- Check your firewall and that the camera has RTSP enabled"
             )
-        raise RuntimeError(f"Video file open nahi ho saki: {source} (corrupt ya unsupported codec?)")
+        raise RuntimeError(f"Could not open the video file: {source} (corrupt or unsupported codec?)")
 
     return cap
 
 
 def reconnect_stream(source: int | str, kind: str) -> cv2.VideoCapture | None:
     """
-    Stream toot jaye to dobara connect karne ki koshish karo.
+    Try to reconnect after a stream drops.
 
-    Network cameras (phone/CCTV) par connection drop hona normal hai — Wi-Fi
-    weak ho jaye ya camera reboot ho. Isliye crash karne ke bajaye retry karte hain.
+    Dropped connections are normal on network cameras (phone or CCTV) — the
+    Wi-Fi weakens, or the camera reboots. So we retry instead of crashing.
     """
     for attempt in range(1, config.STREAM_RECONNECT_ATTEMPTS + 1):
         logger.warning(
-            "Stream disconnect ho gaya — reconnect attempt %d/%d...",
+            "Stream disconnected — reconnect attempt %d/%d...",
             attempt, config.STREAM_RECONNECT_ATTEMPTS,
         )
         time.sleep(config.STREAM_RECONNECT_DELAY)
@@ -268,17 +268,17 @@ def reconnect_stream(source: int | str, kind: str) -> cv2.VideoCapture | None:
         except RuntimeError:
             continue
         if cap.isOpened():
-            logger.info("Stream wapas connect ho gaya.")
+            logger.info("Stream reconnected.")
             return cap
         cap.release()
 
-    logger.error("Stream reconnect nahi ho saka (%d koshishon ke baad).",
+    logger.error("Could not reconnect the stream after %d attempts.",
                  config.STREAM_RECONNECT_ATTEMPTS)
     return None
 
 
 def key_matches(key: int, keys: tuple[str, ...]) -> bool:
-    """OpenCV ka waitKey code compare karo config ke shortcut list se."""
+    """Compare OpenCV's waitKey code against a shortcut list from config."""
     if key == -1:
         return False
     for k in keys:
@@ -311,10 +311,10 @@ def print_summary(counts: dict[str, int], fps: FPSCounter, saved: list[Path]) ->
 # ---------------------------------------------------------------------------
 
 def run_image(detector: Detector, path: str, args: argparse.Namespace) -> int:
-    """Single image par detection — Phase 2 ka test mode."""
+    """Detection on a single image."""
     frame = cv2.imread(path)
     if frame is None:
-        logger.error("Image read nahi ho saki: %s", path)
+        logger.error("Could not read the image: %s", path)
         return 1
 
     detections = detector.detect(frame)
@@ -334,7 +334,7 @@ def run_image(detector: Detector, path: str, args: argparse.Namespace) -> int:
 
     if not args.no_display:
         cv2.imshow(config.WINDOW_NAME, frame)
-        print("\nKoi bhi key dabayein window band karne ke liye...")
+        print("\nPress any key to close the window...")
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
@@ -342,7 +342,7 @@ def run_image(detector: Detector, path: str, args: argparse.Namespace) -> int:
 
 
 def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.Namespace) -> int:
-    """Webcam / network stream / video file ka main loop."""
+    """The main loop for a webcam, network stream or video file."""
     cap = open_capture(source, kind)
     out_dir = Path(args.output_dir) if args.output_dir else None
 
@@ -366,7 +366,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
     )
     if args.lock_id is not None:
         target_lock.lock(args.lock_id)
-    pending_auto_lock = args.lock  # pehle frame par is class ko dhoond kar lock karenge
+    pending_auto_lock = args.lock  # on the first frame, find this class and lock onto it
 
     if args.log or config.ENABLE_CSV_LOG:
         det_logger = DetectionLogger(
@@ -393,21 +393,21 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
         print(HELP_BAR.replace(" | ", "   "))
     print()
 
-    # Mouse click se target lock — callback ko current detections chahiye,
-    # isliye ek mutable holder use karte hain jo har frame update hota hai.
+    # Mouse-click target lock. The callback needs the current detections, so a
+    # mutable holder is updated on every frame.
     click_state: dict = {"detections": detections}
 
     def on_mouse(event, x, y, flags, userdata):
         if event != cv2.EVENT_LBUTTONDOWN:
             return
         if not tracking:
-            print("  Lock ke liye pehle tracking on karein ('t' key ya --track).")
+            print("  Turn tracking on before locking ('t' key or --track).")
             return
         hit = target_lock.lock_at_point(click_state["detections"], x, y)
         if hit is not None:
             print(f"  Locked: #{hit.track_id} {hit.label} ({hit.confidence * 100:.0f}%)")
         else:
-            print("  Us jagah koi trackable object nahi mila.")
+            print("  No trackable object at that point.")
 
     if not args.no_display:
         cv2.namedWindow(config.WINDOW_NAME)
@@ -419,25 +419,25 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                 ok, frame = cap.read()
                 if not ok:
                     if kind == "video":
-                        logger.info("Video khatam.")
+                        logger.info("End of video.")
                         break
                     if kind == "stream":
-                        # Network stream toot gaya — reconnect ki koshish karo
+                        # The network stream dropped — try to reconnect
                         cap.release()
                         new_cap = reconnect_stream(source, kind)
                         if new_cap is None:
                             break
                         cap = new_cap
                         continue
-                    logger.warning("Webcam se frame nahi aaya (disconnect ho gaya?).")
+                    logger.warning("No frame from the webcam (did it disconnect?).")
                     break
 
-                # Tracking mode persistent IDs deta hai — target lock isi par chalta hai
+                # Tracking mode assigns persistent IDs, which target lock relies on
                 detections = detector.track(frame) if tracking else detector.detect(frame)
                 click_state["detections"] = detections
                 counts = count_by_label(detections)
 
-                # --lock CLASS: pehle frame par jahan wo class mile, lock kar do
+                # --lock CLASS: lock onto that class the first time it appears
                 if pending_auto_lock and not target_lock.is_active:
                     hit = target_lock.lock_first(detections, pending_auto_lock)
                     if hit is not None:
@@ -446,7 +446,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
 
                 target = target_lock.update(detections)
 
-                # Lock active ho to baaki objects dim kar do
+                # While a lock is active, dim every other object
                 dim_ids = None
                 if target_lock.is_active:
                     dim_ids = {d.track_id for d in detections if d.track_id != target_lock.track_id}
@@ -473,7 +473,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                         saved_paths.append(writer.path)
                     writer.write(frame)
 
-                # Headless mode mein video ka progress dikhao
+                # Show progress while processing a video headlessly
                 if args.no_display and total_frames and fps_counter.frame_count % 30 == 0:
                     pct = 100 * fps_counter.frame_count / total_frames
                     print(
@@ -485,7 +485,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
 
                 display_frame = frame
             else:
-                # Pause ke doran wohi aakhri frame dikhate rahein
+                # While paused, keep showing the last frame
                 display_frame = frame.copy()
 
             if args.no_display:
@@ -508,7 +508,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
             cv2.imshow(config.WINDOW_NAME, display_frame)
             key = cv2.waitKey(1) & 0xFF
 
-            # User ne X button se window band kar di
+            # The user closed the window with the X button
             if cv2.getWindowProperty(config.WINDOW_NAME, cv2.WND_PROP_VISIBLE) < 1:
                 break
 
@@ -521,7 +521,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
             elif key_matches(key, config.KEY_PAUSE):
                 paused = not paused
                 if not paused:
-                    fps_counter.reset()  # pause ka time FPS mein count na ho
+                    fps_counter.reset()  # don't count paused time towards FPS
                 print("  " + ("Paused" if paused else "Resumed"))
             elif key_matches(key, config.KEY_TOGGLE_OVERLAY):
                 show_overlay = not show_overlay
@@ -532,16 +532,16 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
             elif key_matches(key, config.KEY_TOGGLE_TRACK):
                 tracking = not tracking
                 if not tracking:
-                    target_lock.clear()  # bina IDs ke lock ka koi matlab nahi
+                    target_lock.clear()  # a lock is meaningless without IDs
                 print(f"  Tracking: {'ON' if tracking else 'OFF'}")
             elif key_matches(key, config.KEY_LOCK_FIRST):
                 if not tracking:
-                    print("  Pehle tracking on karein ('t').")
+                    print("  Turn tracking on first ('t').")
                 else:
                     hit = target_lock.lock_first(detections, args.lock)
                     print(
                         f"  Locked: #{hit.track_id} {hit.label}" if hit
-                        else "  Lock karne ke liye koi object nahi mila."
+                        else "  No object available to lock onto."
                     )
             elif key_matches(key, config.KEY_CLEAR_LOCK):
                 target_lock.clear()
@@ -560,7 +560,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
             cv2.destroyAllWindows()
 
     if args.no_display and total_frames:
-        print()  # progress line ke baad newline
+        print()  # newline after the progress line
     print_summary(counts, fps_counter, saved_paths)
     return 0
 
@@ -578,7 +578,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # --list-cameras ka jawab model load kiye bagair de dete hain (fauran)
+    # --list-cameras is answered immediately, without loading the model
     if args.list_cameras:
         try:
             print("\n" + format_camera_table(load_cameras()) + "\n")
@@ -587,7 +587,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
-    # --camera NAME: saved profile ka URL --source ki jagah le leta hai
+    # --camera NAME: the saved profile's URL takes the place of --source
     source_text = args.source
     if args.camera:
         try:
@@ -597,7 +597,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if profile is None:
             logger.error(
-                "Camera '%s' save nahi hai. Saved cameras dekhein: python main.py --list-cameras",
+                "No saved camera called '%s'. List them with: python main.py --list-cameras",
                 args.camera,
             )
             return 1
@@ -617,12 +617,12 @@ def main(argv: list[str] | None = None) -> int:
     except ModelLoadError as exc:
         logger.error("%s", exc)
         return 1
-    except ValueError as exc:  # galat class name
+    except ValueError as exc:  # invalid class name
         logger.error("%s", exc)
         return 1
 
     if args.list_classes:
-        print("\nGroups (shortcut — e.g. --classes animals):\n")
+        print("\nGroups (shortcuts — e.g. --classes animals):\n")
         for group, members in config.CLASS_GROUPS.items():
             print(f"  {group:<10} = {', '.join(members)}")
 
@@ -638,10 +638,10 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("%s", exc)
         return 1
 
-    # --save-camera NAME: source samajh mein aa gaya, ab usay naam de kar mehfooz karo
+    # --save-camera NAME: the source resolved, so store it under that name
     if args.save_camera:
         if kind == "stream":
-            # http = phone app (IP Webcam/DroidCam), rtsp = CCTV — sirf label ke liye
+            # http = phone app (IP Webcam/DroidCam), rtsp = CCTV — a label only
             camera_kind = "cctv" if source_text.lower().startswith(("rtsp://", "rtmp://")) else "mobile"
         elif kind == "webcam":
             camera_kind = "usb"
@@ -653,7 +653,7 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("%s", exc)
             return 1
         print(f"Camera saved: '{saved.name}' -> {saved.safe_url}")
-        print(f"Ab sirf ye kaafi hai:  python main.py --camera {saved.name}\n")
+        print(f"From now on this is enough:  python main.py --camera {saved.name}\n")
 
     try:
         if kind == "image":

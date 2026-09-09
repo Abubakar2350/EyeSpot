@@ -1,8 +1,8 @@
 """
-save_output.py — Screenshots, output video, aur CSV detection log save karna.
+save_output.py — Saving screenshots, output video and the CSV detection log.
 
-Sab kuch config.OUTPUT_DIR ke andar jaata hai, timestamped filenames ke sath
-taake purani files overwrite na hon.
+Everything lands inside config.OUTPUT_DIR with a timestamped filename, so
+earlier files are never overwritten.
 """
 
 from __future__ import annotations
@@ -24,19 +24,19 @@ logger = logging.getLogger(__name__)
 
 def transcode_for_browser(path: Path | str, remove_source: bool = False) -> Path | None:
     """
-    Video ko H.264 mein badlo taake browser (Streamlit) usay chala sake.
+    Re-encode a video to H.264 so a browser (Streamlit) can play it.
 
-    Kyun zaroorat hai: OpenCV is machine par H.264 likh hi nahi sakta (sirf
-    `mp4v` — MPEG-4 Part 2), aur browser ka HTML5 player `mp4v` nahi chalata.
-    File download to phir bhi theek chalti hai (VLC waghera mein), bas browser
-    ke andar preview kaali rehti hai.
+    Why this is needed: OpenCV cannot write H.264 on most builds — only `mp4v`
+    (MPEG-4 Part 2) — and the HTML5 player does not support `mp4v`. Downloading
+    the file still works fine (VLC and friends play it); only the in-browser
+    preview stays blank.
 
-    `ffmpeg` system par na ho to None return hota hai — caller ko bas preview
-    chhorna hai, download phir bhi kaam karta hai.
+    Returns None when `ffmpeg` is not installed, in which case the caller
+    should simply skip the preview; downloads keep working either way.
     """
     source = Path(path)
     if shutil.which("ffmpeg") is None:
-        logger.info("ffmpeg nahi mila — browser preview skip, download phir bhi chalega.")
+        logger.info("ffmpeg not found — skipping browser preview; download still works.")
         return None
 
     target = source.with_name(f"{source.stem}_h264.mp4")
@@ -47,7 +47,7 @@ def transcode_for_browser(path: Path | str, remove_source: bool = False) -> Path
                 "-i", str(source),
                 "-c:v", "libx264",
                 "-preset", "veryfast",
-                "-pix_fmt", "yuv420p",   # purane players ke liye zaroori
+                "-pix_fmt", "yuv420p",   # required by older players
                 "-movflags", "+faststart",
                 str(target),
             ],
@@ -56,13 +56,13 @@ def transcode_for_browser(path: Path | str, remove_source: bool = False) -> Path
             timeout=600,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        logger.warning("ffmpeg transcode fail: %s", exc)
+        logger.warning("ffmpeg transcode failed: %s", exc)
         return None
 
     if remove_source:
         source.unlink(missing_ok=True)
 
-    logger.info("Browser ke liye H.264 version: %s", target)
+    logger.info("Browser-playable H.264 version: %s", target)
     return target
 
 
@@ -82,19 +82,19 @@ def save_screenshot(
     directory: Path | None = None,
 ) -> Path:
     """
-    Current frame ko PNG file mein save karo aur uska path return karo.
+    Save the current frame as a PNG and return its path.
     """
     out_dir = _ensure_output_dir(directory)
     path = out_dir / f"{prefix}_{_timestamp()}.png"
 
-    # Same second mein do screenshots lein to overwrite na ho
+    # Two screenshots in the same second must not overwrite each other
     counter = 1
     while path.exists():
         path = out_dir / f"{prefix}_{_timestamp()}_{counter}.png"
         counter += 1
 
     if not cv2.imwrite(str(path), frame):
-        raise IOError(f"Screenshot save nahi ho saka: {path}")
+        raise IOError(f"Could not save screenshot: {path}")
 
     logger.info("Screenshot saved: %s", path)
     return path
@@ -102,9 +102,9 @@ def save_screenshot(
 
 class VideoWriter:
     """
-    Processed frames ko ek video file mein likhne ke liye chhota wrapper.
+    A small wrapper for writing processed frames to a video file.
 
-    Context manager ki tarah use karein taake file hamesha properly close ho:
+    Use it as a context manager so the file is always closed properly:
         with VideoWriter(path, fps, (w, h)) as writer:
             writer.write(frame)
     """
@@ -123,7 +123,7 @@ class VideoWriter:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Kuch webcams 0 ya ajeeb FPS report karte hain — safe fallback
+        # Some webcams report 0 or a nonsensical FPS — fall back to something sane
         self.fps = float(fps) if fps and fps > 0 else 30.0
         self.frame_size = frame_size
         self.codec = codec or config.VIDEO_CODEC
@@ -132,16 +132,16 @@ class VideoWriter:
         self._writer = cv2.VideoWriter(str(self.path), fourcc, self.fps, frame_size)
         if not self._writer.isOpened():
             raise IOError(
-                f"Video writer open nahi hua: {self.path}\n"
-                f"Codec '{self.codec}' shayad support nahi. config.VIDEO_CODEC "
-                "ko 'XVID' (.avi ke sath) try karein."
+                f"Could not open video writer: {self.path}\n"
+                f"Codec '{self.codec}' may be unsupported. Try setting "
+                "config.VIDEO_CODEC to 'XVID' with an .avi output."
             )
 
         self.frames_written = 0
         logger.info("Writing video to %s (%.1f FPS, %s)", self.path, self.fps, frame_size)
 
     def write(self, frame: np.ndarray) -> None:
-        """Ek frame likho. Size mismatch ho to resize kar deta hai."""
+        """Write one frame, resizing it first if the dimensions do not match."""
         h, w = frame.shape[:2]
         if (w, h) != self.frame_size:
             frame = cv2.resize(frame, self.frame_size)
@@ -163,13 +163,13 @@ class VideoWriter:
 
 class DetectionLogger:
     """
-    Har detection ko CSV mein likhta hai: timestamp, frame, object, confidence, box.
+    Writes every detection to a CSV: timestamp, frame, object, confidence, box.
 
-    Rows buffer mein jama hote hain aur thodi thodi der baad flush hote hain
-    taake har frame par disk write na ho (warna FPS gir jaata hai).
+    Rows are buffered and flushed periodically rather than written on every
+    frame, which would otherwise drag the frame rate down.
     """
 
-    # track_id sirf tracking mode mein bharta hai, warna khali rehta hai
+    # track_id is only populated in tracking mode; it stays empty otherwise
     HEADER = ["timestamp", "frame", "track_id", "label", "confidence", "x1", "y1", "x2", "y2"]
 
     def __init__(
@@ -194,7 +194,7 @@ class DetectionLogger:
         logger.info("Detection log: %s", self.path)
 
     def log(self, frame_index: int, detections) -> None:
-        """Ek frame ki saari detections likho."""
+        """Write every detection from one frame."""
         now = datetime.now().isoformat(timespec="milliseconds")
         for det in detections:
             x1, y1, x2, y2 = det.box
