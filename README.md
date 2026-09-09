@@ -33,6 +33,7 @@ All 80 COCO classes are supported: `person`, `car`, `dog`, `cat`, `cell phone`,
 | CSV detection log (timestamp, track ID, object, confidence, box) | ✅ |
 | Stream auto-reconnect when a network camera drops | ✅ |
 | Streamlit web UI (cached results, video/CSV download) | ✅ |
+| **Browser camera in the web UI — photo + live (WebRTC), works on phones** | ✅ |
 | GPU auto-detection (CUDA / Apple MPS) | ✅ |
 
 ---
@@ -441,8 +442,9 @@ This opens `http://localhost:8501` in your browser, with:
   the annotated video player, a whole-video summary of what was found, and
   **download buttons** for the video and the CSV log. Use "🔄 Process again" for a
   fresh run.
-- **Live camera tab**: a dropdown of saved cameras, the local webcam, or a stream
-  URL — plus the URL builder and a "save this camera" form
+- **Live camera tab**: **the viewing device's own camera** (photo or live WebRTC —
+  point a phone at something), a dropdown of saved cameras, the local webcam, or
+  a stream URL — plus the URL builder and a "save this camera" form
 - Confidence and IoU sliders, class filter, model selector, tracking toggle
 - Download buttons for every result
 
@@ -512,14 +514,20 @@ Two traps worth knowing about `packages.txt`:
 
 The **Image** and **Video** tabs work fully — upload, detect, track, download.
 
-The **Live camera** tab cannot work on any hosted server, and the app says so
-rather than failing: the server has no webcam, and it cannot reach a camera on
-your home network, because `192.168.x.x` and `10.x.x.x` are private addresses
-with no route from the public internet. Detection happens through `SPACE_ID`,
-`EYESPOT_CLOUD`, or the same key in Streamlit secrets.
+**The viewer's own camera also works** — open the app on a phone, pick
+**This device's camera**, and the browser asks for camera permission. Photo mode
+(`st.camera_input`) snaps a frame and detects it; Live mode (`streamlit-webrtc`)
+streams continuous video to the server and returns it annotated. This works
+hosted because the *browser* captures the video — the server never has to reach
+the camera. Live mode runs on the free tier's two CPU cores, so expect a few
+FPS there.
 
-Phone, CCTV and webcam input therefore need EyeSpot running on your own
-machine — which is also where it is fastest.
+What still cannot work hosted: the server's own webcam (it has none) and
+cameras on your home network — `192.168.x.x` and `10.x.x.x` are private
+addresses with no route from the public internet. CCTV/RTSP input therefore
+needs EyeSpot running on your own machine, which is also where it is fastest.
+The app detects a hosted environment through `SPACE_ID`, `EYESPOT_CLOUD`, or
+the same key in Streamlit secrets.
 
 ### Hugging Face Spaces
 

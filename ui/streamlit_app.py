@@ -47,6 +47,17 @@ from utils.save_output import (  # noqa: E402
     transcode_for_browser,
 )
 
+# Optional: live streaming from the viewer's own browser camera (WebRTC).
+# The photo mode below works without it, so a missing package only hides the
+# live option instead of breaking the app.
+try:  # noqa: E402
+    import av  # noqa: E402
+    from streamlit_webrtc import WebRtcMode, webrtc_streamer  # noqa: E402
+
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+
 st.set_page_config(page_title="EyeSpot — Real-Time Detection", page_icon="🎯", layout="wide")
 
 MODEL_CHOICES = ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolo11n.pt", "yolo11s.pt"]
@@ -483,6 +494,100 @@ def save_camera_form(url: str, default_kind: str) -> None:
             st.success(f"Saved: **{profile.name}** → `{profile.safe_url}`  •  CLI: `python main.py --camera {profile.name}`")
 
 
+def device_camera_section(detector: Detector) -> None:
+    """
+    Detection on the camera of the device *viewing* the page — a phone's camera,
+    a tablet's, a laptop's webcam.
+
+    This is fundamentally different from every other source in this tab: those
+    are opened by the server, while here the **browser** captures the video and
+    sends it up. That is why it works even on a hosted demo — the server never
+    needs to reach the camera, the visitor's browser hands the frames over
+    after asking for camera permission. HTTPS is required for that permission
+    prompt, which both streamlit.app and localhost satisfy.
+    """
+    st.caption(
+        "Uses the camera of the device you are reading this on — your browser "
+        "will ask for permission."
+    )
+
+    modes = ["📸 Photo — point and shoot"]
+    if WEBRTC_AVAILABLE:
+        modes.append("🎥 Live — continuous video")
+    mode = st.radio("Mode", modes, horizontal=True)
+
+    if mode.startswith("🎥"):
+        st.caption(
+            "Press START, allow camera access, and the annotated stream comes "
+            "back live. Frames are analysed on the server CPU, so on free "
+            "hosting expect a few FPS — lower **Image size** in the sidebar "
+            "for a smoother stream."
+        )
+
+        def video_frame_callback(frame):
+            img = frame.to_ndarray(format="bgr24")
+            try:
+                detections = detector.detect(img)
+                detector.draw(img, detections)
+            except Exception:
+                # A failed frame should show as unannotated video, not kill
+                # the stream.
+                pass
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+        try:
+            webrtc_streamer(
+                key="device-camera-live",
+                mode=WebRtcMode.SENDRECV,
+                # A public STUN server lets the phone and the hosted server find
+                # a route to each other across NAT. Without it the connection
+                # only works on a local network.
+                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+                media_stream_constraints={"video": True, "audio": False},
+                video_frame_callback=video_frame_callback,
+            )
+        except Exception as exc:
+            # The component needs a real Streamlit runtime; if it cannot start
+            # (unusual host, test harness), fail as one clear message instead
+            # of taking the whole tab down — photo mode still works.
+            st.error(f"Live streaming could not start here: {exc}")
+            st.caption("Use 📸 Photo mode instead — it needs no streaming support.")
+        return
+
+    photo = st.camera_input("Point the camera and take a photo")
+    if photo is None:
+        st.info("Take a photo to run detection on it.")
+        return
+
+    frame = cv2.imdecode(np.frombuffer(photo.getvalue(), np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        st.error("Could not read the captured photo — please try again.")
+        return
+
+    start = time.perf_counter()
+    detections = detector.detect(frame)
+    elapsed = time.perf_counter() - start
+    counts = count_by_label(detections)
+    detector.draw(frame, detections)
+
+    left, right = st.columns([3, 1])
+    with left:
+        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
+    with right:
+        st.metric("Objects", len(detections))
+        st.metric("Inference", f"{elapsed * 1000:.0f} ms")
+        show_counts(counts, st.empty())
+
+    ok, buffer = cv2.imencode(".png", frame)
+    if ok:
+        st.download_button(
+            "⬇️ Download result",
+            buffer.tobytes(),
+            file_name="detected_photo.png",
+            mime="image/png",
+        )
+
+
 def tab_live(detector: Detector, tracking: bool) -> None:
     """A saved camera, the local webcam, or a network camera (phone / CCTV / IP)."""
     try:
@@ -494,20 +599,25 @@ def tab_live(detector: Detector, tracking: bool) -> None:
     hosted = is_cloud()
     if hosted:
         st.info(
-            "**This is a hosted demo.** The server has no webcam of its own, and it "
-            "cannot reach a camera on your home network — `192.168.x.x` addresses are "
-            "private and do not exist on the public internet.\n\n"
-            "Try the **🖼️ Image** and **🎬 Video** tabs instead. To use a phone camera "
-            "or CCTV, run EyeSpot on your own machine — see the README for the steps. "
-            "A publicly reachable stream URL will still work below."
+            "**This is a hosted demo.** Use **This device's camera** below — your "
+            "browser will ask for permission and EyeSpot will analyse what *your* "
+            "camera sees.\n\n"
+            "What does not work here: the server's own webcam (it has none) and "
+            "cameras on your home network — `192.168.x.x` addresses are private "
+            "and do not exist on the public internet. For CCTV/RTSP input, run "
+            "EyeSpot on your own machine — see the README."
         )
 
-    choices = ["Phone / CCTV / IP camera (URL)"]
+    choices = ["This device's camera", "Phone / CCTV / IP camera (URL)"]
     if not hosted:
-        choices.insert(0, "Local webcam")
+        choices.insert(1, "Local webcam")
     if saved:
-        choices.insert(0, "Saved camera")
+        choices.insert(1, "Saved camera")
     source_type = st.radio("Camera type", choices, horizontal=True)
+
+    if source_type == "This device's camera":
+        device_camera_section(detector)
+        return
 
     if source_type == "Saved camera":
         name = st.selectbox(

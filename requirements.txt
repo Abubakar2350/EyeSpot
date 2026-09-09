@@ -4,6 +4,7 @@ opencv-python>=4.8.0      # Webcam capture, drawing, video I/O
 numpy>=1.24.0             # Array operations
 lap>=0.5.12               # Assignment solver for tracking (ByteTrack/BoT-SORT)
 streamlit>=1.63.0         # Web UI
+streamlit-webrtc>=0.77    # Live detection from the viewer's own browser camera
 
 # PyTorch, pinned to the CPU build.
 #

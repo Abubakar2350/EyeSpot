@@ -366,16 +366,22 @@ code. The key was deleted after the platform change, since nothing uses it.
 The **Image** and **Video** tabs work fully when hosted: upload, detect, track,
 download.
 
-The **Live camera** tab cannot work on any hosted server, and the app states this
-plainly rather than failing with a connection error. The server has no webcam of
-its own, and it cannot reach a camera on a home network, because `192.168.x.x`
-and `10.x.x.x` are private addresses with no route from the public internet. The
-app detects a hosted environment through `SPACE_ID`, `EYESPOT_CLOUD`, or the same
-key in Streamlit secrets.
+**The viewer's own camera works too.** Opening the app on a phone and choosing
+"This device's camera" makes the browser ask for camera permission; photo mode
+(`st.camera_input`) captures a frame for detection, and live mode
+(`streamlit-webrtc`) streams continuous video to the server and plays it back
+annotated. This works on a hosted server precisely because the *browser* does
+the capturing — the server never needs a route to the camera. A public STUN
+server (`stun.l.google.com:19302`) lets the phone and the server connect across
+NAT. Live throughput is bounded by the free tier's two CPU cores, so a few FPS
+is the realistic expectation there; the same mode is much smoother locally.
 
-Phone, CCTV and webcam input therefore require a local install — which is also
-where performance is best, since a local machine offers far more CPU than the
-hosted two cores.
+What still cannot work hosted: the server's own webcam (it has none) and any
+camera on a home network — `192.168.x.x` and `10.x.x.x` are private addresses
+with no route from the public internet. CCTV/RTSP input therefore requires a
+local install, which is also where performance is best. The app detects a hosted
+environment through `SPACE_ID`, `EYESPOT_CLOUD`, or the same key in Streamlit
+secrets, and adjusts the camera options it offers accordingly.
 
 ---
 
