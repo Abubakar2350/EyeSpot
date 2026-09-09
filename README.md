@@ -484,17 +484,29 @@ explains itself instead of failing (see below).
 | File | Purpose |
 |---|---|
 | `requirements.txt` | Python dependencies, with torch pinned to its `+cpu` build |
-| `packages.txt` | apt packages installed before pip: `ffmpeg`, `libgl1`, `libglib2.0-0` |
-| `.python-version` | Pins Python 3.11, which the pinned torch wheels are built for |
+| `packages.txt` | apt packages installed before pip: `ffmpeg`, `libgl1`, `libglib2.0-0t64` |
+| `.python-version` | Requests Python 3.11 |
 
 `torch` is pinned to `+cpu` deliberately. The default PyPI wheel bundles the
 CUDA runtime and pulls roughly 2.5 GB of `nvidia-*` packages that no CPU host can
-use — too large for most free tiers. The `+cpu` build is 196 MB.
+use — too large for most free tiers. The `+cpu` build is 196 MB. Wheels are
+published for CPython 3.10 through 3.14, so the pin holds whichever Python the
+host chooses.
 
 `ffmpeg` powers the H.264 transcode that makes result videos playable in the
-browser; `libgl1` and `libglib2.0-0` are what the full (non-headless) OpenCV
-build needs, and the full build is kept because `main.py` opens a real window
-when run locally.
+browser. `libgl1` and `libglib2.0-0t64` supply `libGL.so.1` and
+`libgthread-2.0.so.0`, which the full (non-headless) OpenCV build links against;
+the full build is kept because `main.py` opens a real window when run locally.
+
+Two traps worth knowing about `packages.txt`:
+
+- **It does not support comments.** Every line is passed to `apt-get install`
+  verbatim, so a `#` comment makes apt try to install each of its words as a
+  package and the build fails with `E: Unable to locate package #`.
+- **Package names track the host's Debian release.** Streamlit Cloud currently
+  runs Debian trixie, where the glib runtime is `libglib2.0-0t64`; on bookworm
+  and earlier it is `libglib2.0-0`. A wrong name fails the whole apt step, so
+  check the build log's Debian release if this ever breaks.
 
 ### What works when hosted, and what does not
 
