@@ -1,0 +1,4 @@
+# System packages installed by Streamlit Community Cloud before pip runs.
+ffmpeg
+libgl1
+libglib2.0-0

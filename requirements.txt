@@ -2,11 +2,18 @@
 ultralytics>=8.3.0        # YOLOv8/YOLOv11 models + inference
 opencv-python>=4.8.0      # Webcam capture, drawing, video I/O
 numpy>=1.24.0             # Array operations
-lap>=0.5.12               # Tracking (ByteTrack/BoT-SORT) ka assignment solver
+lap>=0.5.12               # Assignment solver for tracking (ByteTrack/BoT-SORT)
+streamlit>=1.63.0         # Web UI
 
-# Optional — sirf web UI (ui/streamlit_app.py) ke liye
-streamlit>=1.63.0        # width="stretch" (purane use_container_width ki jagah)
-
-# Note: torch/torchvision ultralytics ke sath automatically install hote hain.
-# CPU-only machine par (chhota download, ~200MB) ye pehle chalayein:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# PyTorch, pinned to the CPU build.
+#
+# Ultralytics would pull torch in on its own, but the default PyPI wheel bundles
+# the CUDA runtime and drags in roughly 2.5 GB of nvidia-* packages. That is a
+# slow install everywhere and too large for most free hosting tiers, so the
+# "+cpu" build — which exists only on the PyTorch index — is named explicitly.
+#
+# On a machine with an NVIDIA GPU, install the CUDA build instead:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0+cpu
+torchvision==0.29.0+cpu

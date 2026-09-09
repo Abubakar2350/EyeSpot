@@ -451,40 +451,75 @@ This opens `http://localhost:8501` in your browser, with:
 
 ---
 
-## ☁️ Deployment (Hugging Face Spaces)
+## ☁️ Deployment
 
-The web UI can be published as a hosted demo:
+The web UI is deployed to **Streamlit Community Cloud**, which is free and
+serves the app from this private repository — visitors get a public link, while
+the source stays private.
 
-```bash
-pip install huggingface_hub
-huggingface-cli login              # once
-python deploy/deploy_to_hf.py      # add --private for a private Space
-```
+### Deploying
 
-The script creates the Space if it does not exist, stages only the files the app
-needs, and uploads. Everything else — `.venv`, `outputs/`, and above all
-`cameras.json` — is left out.
+1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub
+2. Authorise Streamlit to read this repository
+3. Create the app with:
 
-Three files under `deploy/` configure the hosted build:
+   | Field | Value |
+   |---|---|
+   | Repository | `<user>/EyeSpot` |
+   | Branch | `main` |
+   | Main file path | `ui/streamlit_app.py` |
+   | Python version | 3.11 |
+
+4. Under **Advanced settings → Secrets**, add:
+
+   ```toml
+   EYESPOT_CLOUD = "1"
+   ```
+
+That last line matters — it tells the app it is hosted, so the live camera tab
+explains itself instead of failing (see below).
+
+### Files that make hosting work
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | Hugging Face removed its native Streamlit SDK, so Streamlit apps ship as Docker Spaces |
-| `requirements-hf.txt` | Headless OpenCV (a server has no display) and CPU-only torch |
-| `README_hf.md` | The Space card, including its YAML configuration block |
+| `requirements.txt` | Python dependencies, with torch pinned to its `+cpu` build |
+| `packages.txt` | apt packages installed before pip: `ffmpeg`, `libgl1`, `libglib2.0-0` |
+| `.python-version` | Pins Python 3.11, which the pinned torch wheels are built for |
 
-### What works in a hosted demo, and what does not
+`torch` is pinned to `+cpu` deliberately. The default PyPI wheel bundles the
+CUDA runtime and pulls roughly 2.5 GB of `nvidia-*` packages that no CPU host can
+use — too large for most free tiers. The `+cpu` build is 196 MB.
+
+`ffmpeg` powers the H.264 transcode that makes result videos playable in the
+browser; `libgl1` and `libglib2.0-0` are what the full (non-headless) OpenCV
+build needs, and the full build is kept because `main.py` opens a real window
+when run locally.
+
+### What works when hosted, and what does not
 
 The **Image** and **Video** tabs work fully — upload, detect, track, download.
 
-The **Live camera** tab cannot work on a hosted server, and the app says so
-instead of failing: the server has no webcam, and it cannot reach a camera on
+The **Live camera** tab cannot work on any hosted server, and the app says so
+rather than failing: the server has no webcam, and it cannot reach a camera on
 your home network, because `192.168.x.x` and `10.x.x.x` are private addresses
-that do not exist on the public internet. The app detects a hosted environment
-through the `SPACE_ID` variable that Spaces sets, or an explicit `EYESPOT_CLOUD=1`.
+with no route from the public internet. Detection happens through `SPACE_ID`,
+`EYESPOT_CLOUD`, or the same key in Streamlit secrets.
 
-Phone, CCTV and webcam input therefore need EyeSpot running on your own machine —
-which is also where it is fastest.
+Phone, CCTV and webcam input therefore need EyeSpot running on your own
+machine — which is also where it is fastest.
+
+### Hugging Face Spaces
+
+`deploy/` holds a working Docker Space setup (`Dockerfile`, `requirements-hf.txt`,
+`README_hf.md`, and `deploy_to_hf.py`), including a `--mode private-source`
+variant that keeps a public Space's source private by cloning it at build time
+with a read-only GitHub deploy key.
+
+It is not currently in use: Hugging Face now requires a **PRO subscription** to
+host Gradio or Docker Spaces on free hardware, and rejects free-tier creation
+with `402 Payment Required`. Only Static Spaces remain free. The setup is kept
+because it works the moment an account has PRO.
 
 ### Why not Vercel, Netlify, or similar
 
@@ -498,8 +533,8 @@ Serverless platforms cannot host this app:
 | Streamlit needs | a long-lived WebSocket server; serverless functions are stateless |
 | Function timeout | 60–300 s, while video processing runs for minutes |
 
-A container platform is the right fit — Hugging Face Spaces, Render, Railway or
-Fly.io all work.
+A container or app platform is the right fit — Streamlit Community Cloud,
+Hugging Face Spaces, Render, Railway or Fly.io.
 
 ---
 

@@ -62,10 +62,21 @@ def is_cloud() -> bool:
     public internet. Detecting the environment lets us explain that up front
     instead of failing with a confusing connection error.
 
-    SPACE_ID is set by Hugging Face Spaces; EYESPOT_CLOUD can be set by hand on
-    any other host.
+    Three signals, in order of specificity:
+      - SPACE_ID       set automatically by Hugging Face Spaces
+      - EYESPOT_CLOUD  set by hand, e.g. in a Dockerfile
+      - the same key in Streamlit secrets, which is how Streamlit Community
+        Cloud passes configuration (it also exports secrets as env vars, but
+        reading st.secrets works whichever way round it happens)
     """
-    return bool(os.getenv("SPACE_ID") or os.getenv("EYESPOT_CLOUD"))
+    if os.getenv("SPACE_ID") or os.getenv("EYESPOT_CLOUD"):
+        return True
+    try:
+        return bool(st.secrets.get("EYESPOT_CLOUD"))
+    except Exception:
+        # No secrets file at all is the normal local case, and older Streamlit
+        # versions raise rather than return empty here.
+        return False
 
 
 @st.cache_resource(show_spinner="Loading model...")
