@@ -13,6 +13,7 @@ Features:
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import time
@@ -49,6 +50,22 @@ from utils.save_output import (  # noqa: E402
 st.set_page_config(page_title="EyeSpot — Real-Time Detection", page_icon="🎯", layout="wide")
 
 MODEL_CHOICES = ["yolov8n.pt", "yolov8s.pt", "yolov8m.pt", "yolo11n.pt", "yolo11s.pt"]
+
+
+def is_cloud() -> bool:
+    """
+    True when the app is running on a hosted server rather than a local machine.
+
+    This matters for the live camera tab: a hosted server has no webcam of its
+    own, and it cannot reach a camera sitting on the user's home network —
+    192.168.x.x and 10.x.x.x are private addresses that do not exist on the
+    public internet. Detecting the environment lets us explain that up front
+    instead of failing with a confusing connection error.
+
+    SPACE_ID is set by Hugging Face Spaces; EYESPOT_CLOUD can be set by hand on
+    any other host.
+    """
+    return bool(os.getenv("SPACE_ID") or os.getenv("EYESPOT_CLOUD"))
 
 
 @st.cache_resource(show_spinner="Loading model...")
@@ -463,7 +480,20 @@ def tab_live(detector: Detector, tracking: bool) -> None:
         st.warning(str(exc))
         saved = {}
 
-    choices = ["Local webcam", "Phone / CCTV / IP camera (URL)"]
+    hosted = is_cloud()
+    if hosted:
+        st.info(
+            "**This is a hosted demo.** The server has no webcam of its own, and it "
+            "cannot reach a camera on your home network — `192.168.x.x` addresses are "
+            "private and do not exist on the public internet.\n\n"
+            "Try the **🖼️ Image** and **🎬 Video** tabs instead. To use a phone camera "
+            "or CCTV, run EyeSpot on your own machine — see the README for the steps. "
+            "A publicly reachable stream URL will still work below."
+        )
+
+    choices = ["Phone / CCTV / IP camera (URL)"]
+    if not hosted:
+        choices.insert(0, "Local webcam")
     if saved:
         choices.insert(0, "Saved camera")
     source_type = st.radio("Camera type", choices, horizontal=True)

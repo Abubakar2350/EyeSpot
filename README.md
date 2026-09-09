@@ -451,6 +451,58 @@ This opens `http://localhost:8501` in your browser, with:
 
 ---
 
+## ☁️ Deployment (Hugging Face Spaces)
+
+The web UI can be published as a hosted demo:
+
+```bash
+pip install huggingface_hub
+huggingface-cli login              # once
+python deploy/deploy_to_hf.py      # add --private for a private Space
+```
+
+The script creates the Space if it does not exist, stages only the files the app
+needs, and uploads. Everything else — `.venv`, `outputs/`, and above all
+`cameras.json` — is left out.
+
+Three files under `deploy/` configure the hosted build:
+
+| File | Purpose |
+|---|---|
+| `Dockerfile` | Hugging Face removed its native Streamlit SDK, so Streamlit apps ship as Docker Spaces |
+| `requirements-hf.txt` | Headless OpenCV (a server has no display) and CPU-only torch |
+| `README_hf.md` | The Space card, including its YAML configuration block |
+
+### What works in a hosted demo, and what does not
+
+The **Image** and **Video** tabs work fully — upload, detect, track, download.
+
+The **Live camera** tab cannot work on a hosted server, and the app says so
+instead of failing: the server has no webcam, and it cannot reach a camera on
+your home network, because `192.168.x.x` and `10.x.x.x` are private addresses
+that do not exist on the public internet. The app detects a hosted environment
+through the `SPACE_ID` variable that Spaces sets, or an explicit `EYESPOT_CLOUD=1`.
+
+Phone, CCTV and webcam input therefore need EyeSpot running on your own machine —
+which is also where it is fastest.
+
+### Why not Vercel, Netlify, or similar
+
+Serverless platforms cannot host this app:
+
+| Constraint | Reality |
+|---|---|
+| Vercel Python bundle limit | 250 MB |
+| `torch` alone | ~770 MB |
+| All required packages | ~930 MB |
+| Streamlit needs | a long-lived WebSocket server; serverless functions are stateless |
+| Function timeout | 60–300 s, while video processing runs for minutes |
+
+A container platform is the right fit — Hugging Face Spaces, Render, Railway or
+Fly.io all work.
+
+---
+
 ## ⚙️ Configuration
 
 Every default lives in [config.py](config.py) — model, thresholds, resolution,
