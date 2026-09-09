@@ -42,7 +42,7 @@ FILES = [
     "test_smoke.py",
     "cameras.example.json",
     "sample.jpg",
-    "REPORT.md",
+    "FINAL_REPORT.md",
 ]
 DIRS = ["detector", "utils", "ui"]
 

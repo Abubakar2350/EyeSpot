@@ -8,7 +8,7 @@ All 80 COCO classes are supported: `person`, `car`, `dog`, `cat`, `cell phone`,
 `laptop`, `bottle`, `chair`, and so on.
 
 > 📋 For the full project report, setup steps for another machine, and a
-> complete answer to "what can it actually track?", see **[REPORT.md](REPORT.md)**
+> complete answer to "what can it actually track?", see **[FINAL_REPORT.md](FINAL_REPORT.md)**
 
 ---
 
