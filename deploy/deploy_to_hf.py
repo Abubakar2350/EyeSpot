@@ -16,7 +16,7 @@ Two deployment modes:
 
 Usage (from the project root, with the venv active):
     python deploy/deploy_to_hf.py --mode bundled --private
-    python deploy/deploy_to_hf.py --mode private-source --github-token ghp_xxx
+    python deploy/deploy_to_hf.py --mode private-source --ssh-key ~/.ssh/eyespot_deploy_key
 
 Hugging Face dropped its native Streamlit SDK, so either way the Space is a
 Docker Space serving Streamlit on port 7860.
@@ -89,8 +89,11 @@ def main() -> int:
         help="bundled = upload the app; private-source = upload only a Dockerfile that clones it",
     )
     parser.add_argument(
-        "--github-token", default=None, metavar="TOKEN",
-        help="Read access to the private repo; stored as the Space secret GITHUB_TOKEN (private-source mode)",
+        "--ssh-key", default=None, metavar="PATH",
+        help=(
+            "Path to a GitHub deploy key (read-only) for the private repo; its contents "
+            "are stored as the Space secret SSH_DEPLOY_KEY (private-source mode)"
+        ),
     )
     parser.add_argument("--dry-run", action="store_true", help="Stage the files and list them, but do not upload")
     args = parser.parse_args()
@@ -112,10 +115,10 @@ def main() -> int:
     print(f"User  : {user}")
     print(f"Space : {space_id}")
 
-    if args.mode == "private-source" and not args.private and not args.github_token:
+    if args.mode == "private-source" and not args.ssh_key:
         print(
-            "private-source mode needs --github-token: the Space clones the code at\n"
-            "build time, and without the token that clone fails."
+            "private-source mode needs --ssh-key: the Space clones the code at build\n"
+            "time, and without the deploy key that clone fails."
         )
         return 1
 
@@ -145,13 +148,13 @@ def main() -> int:
             exist_ok=True,
         )
 
-        if args.github_token:
-            print("Storing the GITHUB_TOKEN Space secret...")
+        if args.ssh_key:
+            print("Storing the SSH_DEPLOY_KEY Space secret...")
             api.add_space_secret(
                 repo_id=space_id,
-                key="GITHUB_TOKEN",
-                value=args.github_token,
-                description="Read access used to clone the private source at build time",
+                key="SSH_DEPLOY_KEY",
+                value=Path(args.ssh_key).read_text(),
+                description="Read-only GitHub deploy key used to clone the private source at build time",
             )
 
         print("Uploading...")

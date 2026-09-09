@@ -2,18 +2,20 @@
 #
 # The Space repository is public, so anyone with the link can use the demo — but
 # the only file in it is this Dockerfile. The application itself is cloned at
-# build time from a private GitHub repository, using a token supplied as a Space
-# secret. Hugging Face does not expose a Space's built image, so visitors get the
-# running app and never the source.
+# build time from a private GitHub repository. Hugging Face never exposes a
+# Space's built image, so visitors get the running app and never the source.
 #
-# Requires a Space secret named GITHUB_TOKEN with read access to the repository.
+# Requires a Space secret named SSH_DEPLOY_KEY holding a GitHub **deploy key**
+# for the repository. A deploy key is scoped to one repository and can be marked
+# read-only, which is why it is used here rather than a personal access token —
+# a PAT would carry access to every repository the account owns.
 
 FROM python:3.11-slim
 
 # ffmpeg powers the H.264 transcode that makes result videos playable in the
-# browser; git is needed to fetch the private source.
+# browser; git and openssh-client fetch the private source.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg git \
+    && apt-get install -y --no-install-recommends ffmpeg git openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Spaces run the container as uid 1000, so build for that user from the start
@@ -37,12 +39,18 @@ ENV STREAMLIT_SERVER_HEADLESS=true
 
 ARG GITHUB_REPO=Abubakar2350/EyeSpot
 
-# The token is mounted as a BuildKit secret, so it never becomes an image layer
-# and cannot be recovered from the built image. Removing .git afterwards also
-# clears the credential that git would otherwise cache in .git/config.
-RUN --mount=type=secret,id=GITHUB_TOKEN,mode=0444,required=true \
-    git clone --depth 1 \
-      "https://$(cat /run/secrets/GITHUB_TOKEN)@github.com/${GITHUB_REPO}.git" /app \
+# The key is a BuildKit secret, so it is never written into an image layer. It
+# is copied to a private-mode file because ssh refuses a key it considers
+# world-readable, then deleted inside the same layer along with .git, which
+# would otherwise retain the remote credentials.
+RUN --mount=type=secret,id=SSH_DEPLOY_KEY,mode=0444 \
+    mkdir -p /home/user/.ssh \
+    && cp /run/secrets/SSH_DEPLOY_KEY /home/user/.ssh/deploy_key \
+    && chmod 600 /home/user/.ssh/deploy_key \
+    && ssh-keyscan -t ed25519 github.com >> /home/user/.ssh/known_hosts 2>/dev/null \
+    && GIT_SSH_COMMAND="ssh -i /home/user/.ssh/deploy_key -o IdentitiesOnly=yes" \
+       git clone --depth 1 "git@github.com:${GITHUB_REPO}.git" /app \
+    && rm -f /home/user/.ssh/deploy_key \
     && rm -rf /app/.git
 
 RUN pip install --no-cache-dir --upgrade pip \
