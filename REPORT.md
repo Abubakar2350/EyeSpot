@@ -375,6 +375,74 @@ On Linux, list them with `ls /dev/video*`
 
 ---
 
+## 7b. Hosted Deployment
+
+The web UI is published as a **Docker Space on Hugging Face**:
+
+```bash
+pip install huggingface_hub
+huggingface-cli login              # once
+python deploy/deploy_to_hf.py --private
+```
+
+`deploy/deploy_to_hf.py` creates the Space if needed, stages only the files the
+app requires, and uploads. `.venv`, `outputs/` and `cameras.json` are never
+included, so no credentials leave the machine.
+
+| File under `deploy/` | Role |
+|---|---|
+| `Dockerfile` | Serves Streamlit on port 7860 |
+| `requirements-hf.txt` | Headless OpenCV, CPU-pinned torch |
+| `README_hf.md` | The Space card and its YAML configuration |
+
+### Two constraints worth recording
+
+**Hugging Face no longer offers a Streamlit SDK.** Creating a Space with
+`sdk: streamlit` is rejected outright:
+
+```
+Invalid option: expected one of "gradio"|"docker"|"static" at sdk
+```
+
+Streamlit apps are therefore packaged as Docker Spaces.
+
+**Torch must be pinned to its `+cpu` build.** A bare `torch` requirement
+resolves to the PyPI wheel, which bundles the CUDA runtime and pulls roughly
+2.5 GB of `nvidia-*` packages that a CPU Space can never use. Naming the `+cpu`
+local version — which exists only on the PyTorch index — forces the ~200 MB
+build and a far faster deploy.
+
+### What a hosted demo can and cannot do
+
+The **Image** and **Video** tabs work fully: upload, detect, track, download.
+
+The **Live camera** tab cannot work on any hosted server, and the app now says
+so rather than failing with a connection error. The server has no webcam, and it
+cannot reach a camera on a home network — `192.168.x.x` and `10.x.x.x` are
+private addresses with no route from the public internet. The app detects a
+hosted environment through `SPACE_ID` (set by Spaces) or an explicit
+`EYESPOT_CLOUD=1`.
+
+Phone, CCTV and webcam input consequently require a local install, which is also
+where performance is best.
+
+### Why not Vercel or Netlify
+
+Serverless platforms cannot host this application:
+
+| Constraint | Reality |
+|---|---|
+| Vercel Python bundle limit | 250 MB |
+| `torch` alone | ~770 MB |
+| All required packages | ~930 MB |
+| Streamlit requires | a long-lived WebSocket server; serverless functions are stateless |
+| Function timeout | 60–300 s, while video processing runs for minutes |
+
+A container platform is the correct fit — Hugging Face Spaces, Render, Railway
+and Fly.io all qualify.
+
+---
+
 ## 8. File Map
 
 ```

@@ -2,19 +2,24 @@
 """
 deploy_to_hf.py — Publish EyeSpot to a Hugging Face Space.
 
+Two deployment modes:
+
+  --mode bundled          Upload the application files to the Space itself.
+                          Simple, but a public Space would then show the source
+                          in its Files tab, so pair this with --private.
+
+  --mode private-source   Upload only a Dockerfile. The application is cloned at
+                          build time from the private GitHub repository using a
+                          Space secret. This is what allows a PUBLIC demo whose
+                          source stays private — visitors get the running app,
+                          not the code.
+
 Usage (from the project root, with the venv active):
-    python deploy/deploy_to_hf.py
-    python deploy/deploy_to_hf.py --space myuser/eyespot --private
+    python deploy/deploy_to_hf.py --mode bundled --private
+    python deploy/deploy_to_hf.py --mode private-source --github-token ghp_xxx
 
-The Space is created if it does not exist, then the app is uploaded. Files are
-staged in a temporary directory first so the Space gets exactly what it needs
-and nothing else — no .venv, no outputs, no cameras.json.
-
-Two files are swapped in for the hosted environment:
-  - deploy/requirements-hf.txt -> requirements.txt   (headless OpenCV, CPU torch)
-  - deploy/README_hf.md        -> README.md          (the Space card + its config)
-  - deploy/Dockerfile          -> Dockerfile         (Hugging Face dropped the
-    native Streamlit SDK, so Streamlit apps are deployed as Docker Spaces)
+Hugging Face dropped its native Streamlit SDK, so either way the Space is a
+Docker Space serving Streamlit on port 7860.
 
 Authentication uses your stored Hugging Face token (`huggingface-cli login`).
 """
@@ -40,6 +45,17 @@ FILES = [
     "REPORT.md",
 ]
 DIRS = ["detector", "utils", "ui"]
+
+
+def stage_private_source(target: Path) -> None:
+    """
+    Stage a Space that holds nothing but a Dockerfile and its card.
+
+    The application never reaches the Space repository, so a public Space
+    exposes no source code.
+    """
+    shutil.copy2(DEPLOY / "README_hf.md", target / "README.md")
+    shutil.copy2(DEPLOY / "Dockerfile.private-source", target / "Dockerfile")
 
 
 def stage(target: Path) -> None:
@@ -68,6 +84,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Deploy EyeSpot to a Hugging Face Space.")
     parser.add_argument("--space", default=None, help="Space id, e.g. myuser/eyespot (default: <you>/eyespot)")
     parser.add_argument("--private", action="store_true", help="Create the Space as private")
+    parser.add_argument(
+        "--mode", choices=["bundled", "private-source"], default="bundled",
+        help="bundled = upload the app; private-source = upload only a Dockerfile that clones it",
+    )
+    parser.add_argument(
+        "--github-token", default=None, metavar="TOKEN",
+        help="Read access to the private repo; stored as the Space secret GITHUB_TOKEN (private-source mode)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Stage the files and list them, but do not upload")
     args = parser.parse_args()
 
@@ -88,9 +112,19 @@ def main() -> int:
     print(f"User  : {user}")
     print(f"Space : {space_id}")
 
+    if args.mode == "private-source" and not args.private and not args.github_token:
+        print(
+            "private-source mode needs --github-token: the Space clones the code at\n"
+            "build time, and without the token that clone fails."
+        )
+        return 1
+
     with tempfile.TemporaryDirectory() as tmp:
         staging = Path(tmp)
-        stage(staging)
+        if args.mode == "private-source":
+            stage_private_source(staging)
+        else:
+            stage(staging)
 
         staged = sorted(p.relative_to(staging) for p in staging.rglob("*") if p.is_file())
         total_mb = sum((staging / p).stat().st_size for p in staged) / 1e6
@@ -110,6 +144,15 @@ def main() -> int:
             private=args.private,
             exist_ok=True,
         )
+
+        if args.github_token:
+            print("Storing the GITHUB_TOKEN Space secret...")
+            api.add_space_secret(
+                repo_id=space_id,
+                key="GITHUB_TOKEN",
+                value=args.github_token,
+                description="Read access used to clone the private source at build time",
+            )
 
         print("Uploading...")
         api.upload_folder(

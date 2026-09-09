@@ -1,15 +1,20 @@
 # Requirements for the hosted Hugging Face Space.
 #
 # Two differences from the local requirements.txt:
+#
 #   1. opencv-python-headless — a server has no display, and the headless build
-#      avoids the libGL system dependency entirely.
-#   2. CPU-only torch — the Space runs on CPU hardware, so the CUDA wheels
-#      (~2.5 GB) would only slow the build down.
+#      drops the libGL system dependency entirely.
+#
+#   2. CPU-only torch, pinned to the "+cpu" build. This matters: given a plain
+#      `torch` requirement, pip resolves the PyPI wheel, which bundles the CUDA
+#      runtime and drags in roughly 2.5 GB of nvidia-* packages that a CPU Space
+#      can never use. The "+cpu" local version exists only on the PyTorch index,
+#      so naming it explicitly forces the small build and a far faster deploy.
 
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-torch
-torchvision
+torch==2.14.0+cpu
+torchvision==0.29.0+cpu
 
 ultralytics>=8.3.0
 opencv-python-headless>=4.8.0
