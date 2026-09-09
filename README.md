@@ -9,6 +9,10 @@ All 80 COCO classes are supported: `person`, `car`, `dog`, `cat`, `cell phone`,
 
 > 📋 For the full project report, setup steps for another machine, and a
 > complete answer to "what can it actually track?", see **[FINAL_REPORT.md](FINAL_REPORT.md)**
+>
+> 📹 For connecting a home CCTV camera, whether that setup persists, and what a
+> multi-user version with Google sign-in would require, see
+> **[USER_REPORT_HOME_CCTV.md](USER_REPORT_HOME_CCTV.md)**
 
 ---
 
