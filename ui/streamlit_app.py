@@ -39,6 +39,11 @@ from utils.cameras import (  # noqa: E402
     save_camera,
 )
 from utils.fps_counter import FPSCounter  # noqa: E402
+from utils.save_output import (  # noqa: E402
+    DetectionLogger,
+    VideoWriter,
+    transcode_for_browser,
+)
 
 st.set_page_config(page_title="YOLO Real-Time Detection", page_icon="🎯", layout="wide")
 
@@ -91,7 +96,7 @@ def show_counts(counts: dict[str, int], placeholder) -> None:
         return
     placeholder.dataframe(
         {"Object": list(counts.keys()), "Count": list(counts.values())},
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -120,7 +125,7 @@ def tab_image(detector: Detector) -> None:
 
     left, right = st.columns([3, 1])
     with left:
-        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
+        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
     with right:
         st.metric("Objects", len(detections))
         st.metric("Inference", f"{elapsed * 1000:.0f} ms")
@@ -136,22 +141,112 @@ def tab_image(detector: Detector) -> None:
         )
 
 
+def show_video_result(result: dict) -> None:
+    """
+    Process ho chuki video ka result dikhao — player, summary, aur downloads.
+
+    Ye session_state se aata hai, isliye slider hilane ya tab badalne par
+    video **dobara process nahi hoti** — bas yehi result phir se dikh jaata hai.
+    """
+    st.success(
+        f"✅ Ho gaya — {result['frames']} frames, average {result['fps']:.1f} FPS "
+        f"({result['duration']:.0f}s mein)"
+    )
+
+    video_path = Path(result["video"])
+    playable = result.get("playable")
+
+    if playable and Path(playable).exists():
+        st.video(str(playable))
+    else:
+        st.info(
+            "Browser mein preview nahi ho sakti (H.264 encoder mojood nahi). "
+            "Neeche se download kar ke VLC ya kisi bhi player mein dekh lein."
+        )
+
+    st.subheader("Poori video mein kya kya mila")
+    summary = result["summary"]
+    if summary:
+        st.dataframe(
+            {
+                "Object": [row["label"] for row in summary],
+                "Kitne frames mein": [row["frames"] for row in summary],
+                "Ek frame mein max": [row["max_in_frame"] for row in summary],
+                "Unique objects": [row["unique"] for row in summary],
+            },
+            width="stretch",
+            hide_index=True,
+        )
+        if not result["tracking"]:
+            st.caption(
+                "💡 **Unique objects** ginne ke liye sidebar se **Object tracking** on karein — "
+                "warna ek hi cheez har frame mein dobara gini jaati hai."
+            )
+    else:
+        st.info("Poori video mein koi object detect nahi hua. Confidence threshold kam kar ke dekhein.")
+
+    # H.264 version chhoti hoti hai aur har player/browser mein chalti hai,
+    # isliye download ke liye wohi behtar hai. Na bani ho to asli file de do.
+    download_path = Path(playable) if playable and Path(playable).exists() else video_path
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if download_path.exists():
+            size_mb = download_path.stat().st_size / 1e6
+            st.download_button(
+                f"⬇️ Detected video download karein ({size_mb:.1f} MB)",
+                download_path.read_bytes(),
+                file_name=download_path.name,
+                mime="video/mp4",
+                width="stretch",
+            )
+    with col2:
+        csv_path = Path(result["csv"])
+        if csv_path.exists():
+            st.download_button(
+                "⬇️ Detection log (CSV)",
+                csv_path.read_bytes(),
+                file_name=csv_path.name,
+                mime="text/csv",
+                width="stretch",
+            )
+
+    st.caption(f"Files yahan bhi mehfooz hain: `{video_path.parent}`")
+
+
 def tab_video(detector: Detector, tracking: bool = False) -> None:
     uploaded = st.file_uploader("Video upload karein", type=["mp4", "avi", "mov", "mkv"])
     if uploaded is None:
         st.info("Ek video file upload karein (.mp4 / .avi).")
         return
 
-    # Streamlit upload memory mein hota hai; OpenCV ko file path chahiye
-    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tmp:
-        tmp.write(uploaded.read())
-        video_path = tmp.name
+    # Har upload ki apni pehchan. Nayi file aaye to purana result nahi dikhana.
+    job_key = f"{uploaded.name}:{uploaded.size}"
+    cached = st.session_state.get("video_result")
+
+    # Ek baar process ho chuki hai? To dobara mat chalao — wohi result dikhao.
+    # (Streamlit har interaction par poora script dobara chalata hai; is check
+    #  ke bagair har slider par video shuru se process hone lagti hai.)
+    if cached and cached.get("key") == job_key:
+        show_video_result(cached)
+        st.divider()
+        st.caption("Settings badli hain aur naya result chahiye?")
+        if st.button("🔄 Dobara process karein"):
+            st.session_state.pop("video_result", None)
+            st.rerun()
+        return
 
     if not st.button("▶️ Start detection", type="primary"):
         return
 
+    # Streamlit upload memory mein hota hai; OpenCV ko file path chahiye
+    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded.name).suffix) as tmp:
+        tmp.write(uploaded.getbuffer())
+        video_path = tmp.name
+
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
+        Path(video_path).unlink(missing_ok=True)
         st.error("Video open nahi ho saki (unsupported codec?).")
         return
 
@@ -159,11 +254,22 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
         detector.reset_tracker()  # nayi video = IDs 1 se dobara shuru
 
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    src_fps = cap.get(cv2.CAP_PROP_FPS)
+    stem = Path(uploaded.name).stem
+
     frame_slot = st.empty()
     stats_slot = st.sidebar.empty()
     counts_slot = st.sidebar.empty()
     progress = st.progress(0.0, text="Processing...")
     fps_counter = FPSCounter()
+
+    writer: VideoWriter | None = None
+    det_logger = DetectionLogger(prefix=f"{stem}_detections")
+
+    # Poori video ka hisaab — sirf aakhri frame ka nahi
+    frames_seen: dict[str, int] = {}
+    max_in_frame: dict[str, int] = {}
+    unique_ids: dict[str, set] = {}
 
     try:
         while True:
@@ -176,7 +282,25 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
             detector.draw(frame, detections)
             fps_counter.update()
 
-            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
+            for label, count in counts.items():
+                frames_seen[label] = frames_seen.get(label, 0) + count
+                max_in_frame[label] = max(max_in_frame.get(label, 0), count)
+            for det in detections:
+                if det.track_id is not None:
+                    unique_ids.setdefault(det.label, set()).add(det.track_id)
+
+            det_logger.log(fps_counter.frame_count, detections)
+
+            if writer is None:
+                h, w = frame.shape[:2]
+                writer = VideoWriter(
+                    fps=src_fps if src_fps and src_fps > 0 else 25.0,
+                    frame_size=(w, h),
+                    prefix=f"{stem}_detected",
+                )
+            writer.write(frame)
+
+            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
             stats_slot.metric("FPS", f"{fps_counter.value:.1f}", f"{len(detections)} objects")
             show_counts(counts, counts_slot)
 
@@ -187,10 +311,46 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
                 )
     finally:
         cap.release()
+        if writer is not None:
+            writer.release()
+        det_logger.close()
         Path(video_path).unlink(missing_ok=True)
 
     progress.empty()
-    st.success(f"Done — {fps_counter.frame_count} frames, average {fps_counter.average:.1f} FPS")
+    frame_slot.empty()
+
+    if writer is None:
+        st.error("Video se ek bhi frame nahi mila.")
+        return
+
+    with st.spinner("Video ko browser ke liye tayyar kiya ja raha hai..."):
+        playable = transcode_for_browser(writer.path)
+
+    summary = sorted(
+        (
+            {
+                "label": label,
+                "frames": count,
+                "max_in_frame": max_in_frame.get(label, 0),
+                "unique": len(unique_ids.get(label, ())) if tracking else "—",
+            }
+            for label, count in frames_seen.items()
+        ),
+        key=lambda row: -row["frames"],
+    )
+
+    st.session_state["video_result"] = {
+        "key": job_key,
+        "video": str(writer.path),
+        "playable": str(playable) if playable else None,
+        "csv": str(det_logger.path),
+        "frames": fps_counter.frame_count,
+        "fps": fps_counter.average,
+        "duration": fps_counter.elapsed,
+        "tracking": tracking,
+        "summary": summary,
+    }
+    st.rerun()  # ab result view dikhao (aur loop dobara na chale)
 
 
 def camera_url_builder() -> str | None:
@@ -360,7 +520,7 @@ def tab_live(detector: Detector, tracking: bool) -> None:
             detector.draw(frame, detections)
             fps_counter.update()
 
-            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
+            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
             stats_slot.metric("FPS", f"{fps_counter.value:.1f}", f"{len(detections)} objects")
             show_counts(counts, counts_slot)
     finally:

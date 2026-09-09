@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import csv
 import logging
+import shutil
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +20,50 @@ import numpy as np
 import config
 
 logger = logging.getLogger(__name__)
+
+
+def transcode_for_browser(path: Path | str, remove_source: bool = False) -> Path | None:
+    """
+    Video ko H.264 mein badlo taake browser (Streamlit) usay chala sake.
+
+    Kyun zaroorat hai: OpenCV is machine par H.264 likh hi nahi sakta (sirf
+    `mp4v` — MPEG-4 Part 2), aur browser ka HTML5 player `mp4v` nahi chalata.
+    File download to phir bhi theek chalti hai (VLC waghera mein), bas browser
+    ke andar preview kaali rehti hai.
+
+    `ffmpeg` system par na ho to None return hota hai — caller ko bas preview
+    chhorna hai, download phir bhi kaam karta hai.
+    """
+    source = Path(path)
+    if shutil.which("ffmpeg") is None:
+        logger.info("ffmpeg nahi mila — browser preview skip, download phir bhi chalega.")
+        return None
+
+    target = source.with_name(f"{source.stem}_h264.mp4")
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-i", str(source),
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",   # purane players ke liye zaroori
+                "-movflags", "+faststart",
+                str(target),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=600,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        logger.warning("ffmpeg transcode fail: %s", exc)
+        return None
+
+    if remove_source:
+        source.unlink(missing_ok=True)
+
+    logger.info("Browser ke liye H.264 version: %s", target)
+    return target
 
 
 def _timestamp() -> str:

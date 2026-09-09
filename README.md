@@ -32,7 +32,7 @@ COCO dataset ki 80 classes support hain: `person`, `car`, `dog`, `cat`,
 | Annotated video save | ✅ |
 | CSV detection log (timestamp, track ID, object, confidence, box) | ✅ |
 | Stream auto-reconnect (network camera drop ho jaye to) | ✅ |
-| Streamlit web UI | ✅ |
+| Streamlit web UI (result cache + video/CSV download) | ✅ |
 | GPU (CUDA / Apple MPS) auto-detect | ✅ |
 
 ---
@@ -427,6 +427,10 @@ streamlit run ui/streamlit_app.py
 
 Browser par `http://localhost:8501` khulega. Wahan:
 - **Image / Video / Live camera** — teen tabs
+- **Video tab**: process hone ke baad result **cache** ho jaata hai — slider hilane
+  ya tab badalne par video **dobara process nahi hoti**. Wahin par annotated video
+  ka player, poori video ka summary ("kya kya mila"), aur **download buttons**
+  (video + CSV log) mil jaate hain. Naya result chahiye to "🔄 Dobara process karein".
 - Live camera tab par: **saved cameras ki dropdown**, local webcam, ya stream URL
 - **URL builder** — brand chunein + IP daalein, poora RTSP URL khud ban jayega
   (password bhi khud URL-encode ho jaata hai)

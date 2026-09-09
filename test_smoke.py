@@ -168,6 +168,39 @@ def test_save_output() -> str:
     return "screenshot, video, CSV — teeno OK"
 
 
+def test_browser_transcode() -> str:
+    """Streamlit ke player ke liye H.264 version banta hai (ffmpeg ho to)."""
+    import shutil
+
+    import cv2
+    import numpy as np
+
+    from utils.save_output import VideoWriter, transcode_for_browser
+
+    if shutil.which("ffmpeg") is None:
+        return "skipped (ffmpeg installed nahi — download phir bhi chalta hai)"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "clip.mp4"
+        with VideoWriter(path=source, fps=10, frame_size=(160, 120)) as writer:
+            for i in range(10):
+                frame = np.full((120, 160, 3), i * 20, dtype=np.uint8)
+                writer.write(frame)
+
+        out = transcode_for_browser(source)
+        assert out is not None and out.exists(), "H.264 file nahi bani"
+        assert out.stat().st_size > 0, "H.264 file khali hai"
+
+        # Padh bhi sakein — warna browser mein bhi nahi chalegi
+        cap = cv2.VideoCapture(str(out))
+        assert cap.isOpened(), "H.264 video open nahi hui"
+        ok, _ = cap.read()
+        cap.release()
+        assert ok, "H.264 video se frame nahi mila"
+
+    return "mp4v -> H.264 (browser-playable)"
+
+
 def test_video_pipeline() -> str:
     import cv2
     import numpy as np
@@ -412,6 +445,7 @@ TESTS = [
     ("Overlay drawing", test_overlay),
     ("Output saving", test_save_output),
     ("Video pipeline", test_video_pipeline),
+    ("Browser transcode (H.264)", test_browser_transcode),
     ("CLI parsing", test_cli_parsing),
     ("Stream URLs (phone/CCTV)", test_stream_urls),
     ("Camera profiles (cameras.json)", test_camera_profiles),
