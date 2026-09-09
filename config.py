@@ -54,6 +54,23 @@ IOU_THRESHOLD = 0.45
 # Empty list ya None = saari 80 COCO classes.
 CLASS_FILTER: list[str] = []
 
+# Class groups — "animal" naam ki koi ek COCO class nahi hoti, isliye aam
+# groups ke shortcuts bana diye hain. `--classes animals` likhein to ye
+# saari classes khud khul jaati hain.
+CLASS_GROUPS: dict[str, list[str]] = {
+    "animals": [
+        "bird", "cat", "dog", "horse", "sheep", "cow",
+        "elephant", "bear", "zebra", "giraffe",
+    ],
+    "pets": ["cat", "dog", "bird"],
+    "people": ["person"],
+    "vehicles": [
+        "bicycle", "car", "motorcycle", "airplane",
+        "bus", "train", "truck", "boat",
+    ],
+    "road": ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"],
+}
+
 # Ek frame mein max kitni detections rakhni hain
 MAX_DETECTIONS = 300
 

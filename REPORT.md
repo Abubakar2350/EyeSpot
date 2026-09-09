@@ -138,6 +138,7 @@ Har class ke liye:
 |---|---|
 | Detect karna | `python main.py --camera gate` |
 | Sirf ek cheez dekhna | `--classes person` |
+| Poora group dekhna | `--classes animals` / `vehicles` / `pets` / `road` |
 | Persistent ID dena (tracking) | `--track` → har box par `#1`, `#2` … |
 | Ek object ko follow karna (lock) | window mein us par **click**, ya `--lock person` |
 | Kitne unique log/gaadiyan aayin | `--track --log` → CSV mein `track_id` ke unique values |

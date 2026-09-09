@@ -104,10 +104,27 @@ python main.py --source photo.jpg --save
 ### Sirf specific objects detect karein
 
 ```bash
-python main.py --classes person
-python main.py --classes person car dog
-python main.py --list-classes                      # saari 80 classes dekhein
+python main.py --classes person                    # sirf log
+python main.py --classes person car dog            # ek se zyada
+python main.py --list-classes                      # saare groups + 80 classes
 ```
+
+**Groups** — "animal" naam ki koi ek COCO class nahi hoti, isliye shortcuts bane hue hain:
+
+| Group | Kya kya |
+|---|---|
+| `people` | person |
+| `animals` | bird, cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe |
+| `pets` | cat, dog, bird |
+| `vehicles` | bicycle, car, motorcycle, airplane, bus, train, truck, boat |
+| `road` | person, bicycle, car, motorcycle, bus, truck, traffic light, stop sign |
+
+```bash
+python main.py --classes animals                   # koi bhi jaanwar
+python main.py --classes person animals            # log + jaanwar dono
+```
+
+Apna group banana ho to `config.py` ke `CLASS_GROUPS` mein add kar dein.
 
 ### Zyada accuracy chahiye (thoda slow)
 

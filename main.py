@@ -119,7 +119,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--classes", nargs="*", default=None, metavar="NAME",
-        help='Sirf ye classes detect karo, e.g. --classes person car',
+        help=(
+            "Sirf ye classes detect karo, e.g. --classes person car. "
+            f"Groups bhi chalte hain: {', '.join(sorted(config.CLASS_GROUPS))}"
+        ),
     )
     # -- tracking / target lock --
     parser.add_argument(
@@ -619,6 +622,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.list_classes:
+        print("\nGroups (shortcut — e.g. --classes animals):\n")
+        for group, members in config.CLASS_GROUPS.items():
+            print(f"  {group:<10} = {', '.join(members)}")
+
         print(f"\n{len(detector.class_names)} classes:\n")
         for i, name in enumerate(detector.class_names):
             print(f"  {i:>2}. {name}")

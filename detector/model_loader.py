@@ -103,15 +103,42 @@ def load_model(model_name: str | None = None, device: str | None = None):
     return model, device
 
 
+def expand_class_groups(names: list[str]) -> list[str]:
+    """
+    Group ke naam ko us ki classes mein khol do.
+
+        ["animals"]        -> ["bird", "cat", "dog", ...]
+        ["person", "pets"] -> ["person", "cat", "dog", "bird"]
+
+    Jo naam group nahi hai wo waise ka waisa rehta hai. Duplicates hat jaate
+    hain lekin tarteeb wohi rehti hai jo user ne di.
+    """
+    expanded: list[str] = []
+    for name in names:
+        key = name.strip().lower()
+        expanded.extend(config.CLASS_GROUPS.get(key, [name]))
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for name in expanded:
+        if name.lower() not in seen:
+            seen.add(name.lower())
+            unique.append(name)
+    return unique
+
+
 def class_name_to_id(model, names: list[str]) -> list[int]:
     """
     Class ke naam (e.g. ["person", "car"]) ko YOLO ke class IDs mein badlo.
 
+    Group ke naam (e.g. "animals") pehle apni classes mein khul jaate hain.
     Unknown naam par ValueError raise hoti hai taake user ko turant pata chale
     ke usne typo kiya hai.
     """
     if not names:
         return []
+
+    names = expand_class_groups(names)
 
     # model.names => {0: "person", 1: "bicycle", ...}
     lookup = {label.lower(): idx for idx, label in model.names.items()}
@@ -126,9 +153,11 @@ def class_name_to_id(model, names: list[str]) -> list[int]:
             unknown.append(name)
 
     if unknown:
+        groups = ", ".join(sorted(config.CLASS_GROUPS))
         available = ", ".join(sorted(lookup))
         raise ValueError(
             f"Ye class name(s) model mein mojood nahi: {unknown}\n"
+            f"Groups: {groups}\n"
             f"Available classes: {available}"
         )
 

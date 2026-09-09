@@ -239,6 +239,32 @@ def test_stream_urls() -> str:
     return f"{len(urls)} URL formats + password masking"
 
 
+def test_class_groups() -> str:
+    """`--classes animals` jaise group shortcuts khulne chahiyein."""
+    import config
+    from detector.model_loader import class_name_to_id, expand_class_groups
+
+    assert "dog" in expand_class_groups(["animals"]), "animals mein dog hona chahiye"
+    assert expand_class_groups(["person"]) == ["person"], "aam class waisi hi rehni chahiye"
+
+    # Group + aam class mila kar, aur duplicates ek hi baar
+    mixed = expand_class_groups(["person", "pets", "dog"])
+    assert mixed[0] == "person" and mixed.count("dog") == 1, mixed
+
+    detector = globals()["_DETECTOR"]
+    ids = class_name_to_id(detector.model, ["animals"])
+    assert len(ids) == len(config.CLASS_GROUPS["animals"]), f"{len(ids)} IDs mile"
+    assert len(set(ids)) == len(ids), "duplicate IDs nahi honi chahiyein"
+
+    try:
+        class_name_to_id(detector.model, ["aisi_koi_class_nahi"])
+        raise AssertionError("unknown class par ValueError aani chahiye thi")
+    except ValueError as exc:
+        assert "Groups:" in str(exc), "error mein groups ka zikr hona chahiye"
+
+    return f"{len(config.CLASS_GROUPS)} groups; animals -> {len(ids)} classes"
+
+
 def test_camera_profiles() -> str:
     """cameras.json save/load, naam se source resolve, aur brand URL builder."""
     import config
@@ -382,6 +408,7 @@ TESTS = [
     ("Detection on blank frame", test_detect_synthetic),
     ("Detection on sample image", test_detect_sample),
     ("Class filter", test_class_filter),
+    ("Class groups (animals/vehicles)", test_class_groups),
     ("Overlay drawing", test_overlay),
     ("Output saving", test_save_output),
     ("Video pipeline", test_video_pipeline),
