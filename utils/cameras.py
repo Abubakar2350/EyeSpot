@@ -41,31 +41,37 @@ KINDS = ("mobile", "cctv", "usb", "other")
 # (detection ke liye kaafi tez — CPU par isi ko tarjeeh dein)
 CAMERA_BRANDS: dict[str, dict] = {
     "hikvision": {
+        "label": "Hikvision",
         "port": 554,
         "main": "/Streaming/Channels/101",
         "sub": "/Streaming/Channels/102",
     },
     "dahua": {
+        "label": "Dahua",
         "port": 554,
         "main": "/cam/realmonitor?channel=1&subtype=0",
         "sub": "/cam/realmonitor?channel=1&subtype=1",
     },
     "cpplus": {  # CP Plus Dahua ka hi firmware use karta hai
+        "label": "CP Plus",
         "port": 554,
         "main": "/cam/realmonitor?channel=1&subtype=0",
         "sub": "/cam/realmonitor?channel=1&subtype=1",
     },
     "tplink": {  # Tapo C100 / C200 / C210
+        "label": "TP-Link Tapo (C100 / C200 / C210)",
         "port": 554,
         "main": "/stream1",
         "sub": "/stream2",
     },
     "reolink": {
+        "label": "Reolink",
         "port": 554,
         "main": "/h264Preview_01_main",
         "sub": "/h264Preview_01_sub",
     },
     "onvif": {  # generic — zyada tar sasti IP cameras
+        "label": "ONVIF (generic — koi bhi sasti IP camera)",
         "port": 554,
         "main": "/onvif1",
         "sub": "/onvif2",
@@ -75,22 +81,31 @@ CAMERA_BRANDS: dict[str, dict] = {
 # Mobile phone ko IP camera banane wali apps — ye HTTP par stream deti hain
 # (RTSP nahi), isliye inhe alag rakha hai.
 MOBILE_APPS: dict[str, dict] = {
-    "ip-webcam": {  # Android — "IP Webcam" (sabse aam, free)
+    "ip-webcam": {
+        "label": "IP Webcam — Android (sabse aam, free)",
         "scheme": "http",
         "port": 8080,
         "path": "/video",
     },
-    "droidcam": {  # Android + iPhone — "DroidCam"
+    "droidcam": {
+        "label": "DroidCam — Android + iPhone",
         "scheme": "http",
         "port": 4747,
         "path": "/video",
     },
-    "iriun": {  # Android + iPhone — "Iriun Webcam"
+    "iriun": {
+        "label": "Iriun Webcam — Android + iPhone",
         "scheme": "http",
         "port": 8080,
         "path": "/video",
     },
 }
+
+
+def describe(key: str) -> str:
+    """Dropdown mein dikhane ke liye padha ja sakne wala naam."""
+    spec = MOBILE_APPS.get(key) or CAMERA_BRANDS.get(key) or {}
+    return spec.get("label", key)
 
 
 # ---------------------------------------------------------------------------

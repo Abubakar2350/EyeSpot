@@ -203,8 +203,10 @@ cp cameras.example.json cameras.json      # Windows: copy cameras.example.json c
 > jaati hai — doosre PC par usay copy kar ke apni values daal lein.
 
 **Streamlit UI mein**: Live camera tab par saved cameras ki dropdown, aur ek
-**URL builder** hai — brand chunein + IP daalein, poora RTSP URL khud ban jayega
-(password bhi khud URL-encode ho jaata hai).
+**URL builder** hai. Wo pehle poochta hai **📱 Mobile phone** ya **📹 CCTV / IP
+camera** — phir usi ki list dikhata hai (phone ke liye IP Webcam / DroidCam /
+Iriun, CCTV ke liye brands). Bas IP daalein, poora URL khud ban jayega aur
+password bhi khud URL-encode ho jayega.
 
 ---
 

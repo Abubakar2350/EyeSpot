@@ -35,6 +35,7 @@ from utils.cameras import (  # noqa: E402
     MOBILE_APPS,
     CameraStoreError,
     build_url,
+    describe,
     load_cameras,
     save_camera,
 )
@@ -358,25 +359,55 @@ def camera_url_builder() -> str | None:
     Brand chun kar URL bana lene wala helper — RTSP ka format yaad rakhne ki
     zaroorat nahi. Bana hua URL return karta hai (ya None).
     """
-    with st.expander("🔧 URL builder — brand se URL bana lein"):
-        brands = ["-- select --", *sorted(MOBILE_APPS), *sorted(CAMERA_BRANDS)]
-        brand = st.selectbox(
-            "Camera / app",
-            brands,
-            help="Mobile apps (ip-webcam, droidcam, iriun) HTTP par stream deti hain; CCTV brands RTSP par.",
+    with st.expander("🔧 URL builder — URL khud bana lein", expanded=True):
+        # Pehle qism poochte hain. Warna phone wali apps (ip-webcam, droidcam)
+        # CCTV brands ke beech mein gum ho jaati hain aur user ko lagta hai
+        # ke yahan sirf CCTV hi hai.
+        kind = st.radio(
+            "Kaunsa camera hai?",
+            ["📱 Mobile phone", "📹 CCTV / IP camera"],
+            horizontal=True,
         )
-        if brand == "-- select --":
-            return None
+        is_mobile = kind.startswith("📱")
 
-        is_mobile = brand in MOBILE_APPS
+        if is_mobile:
+            st.caption(
+                "Phone ko camera banane ke liye us par ek app chahiye. "
+                "Neeche se apni app chunein — na ho to Play Store / App Store se "
+                "**IP Webcam** install kar lein (free)."
+            )
+            options = list(MOBILE_APPS)
+        else:
+            st.caption("Apne CCTV/IP camera ka brand chunein.")
+            options = list(CAMERA_BRANDS)
+
+        brand = st.selectbox(
+            "App" if is_mobile else "Brand",
+            options,
+            format_func=describe,
+        )
+
+        if is_mobile:
+            st.info(
+                f"**{describe(brand)}** — phone par app kholein → **Start server** dabayein → "
+                "screen par jo IP dikhe (jaise `192.168.1.5`) wo neeche daal dein. "
+                "Phone aur PC **same Wi-Fi** par hone chahiye."
+            )
+
         col1, col2 = st.columns(2)
         with col1:
-            ip = st.text_input("Camera / phone IP", placeholder="192.168.1.5").strip()
+            ip = st.text_input(
+                "Phone ka IP" if is_mobile else "Camera ka IP",
+                placeholder="192.168.1.5",
+            ).strip()
             user = st.text_input("Username", value="" if is_mobile else "admin").strip()
         with col2:
             default_port = (MOBILE_APPS if is_mobile else CAMERA_BRANDS)[brand]["port"]
             port = int(st.number_input("Port", min_value=1, max_value=65535, value=default_port))
             password = st.text_input("Password", type="password")
+
+        if is_mobile:
+            st.caption("Phone par aam tor par username/password ki zaroorat nahi — khali chhor dein.")
 
         quality = "sub"
         if not is_mobile:
@@ -388,7 +419,7 @@ def camera_url_builder() -> str | None:
             )
 
         if not ip:
-            st.caption("IP daalein to URL ban jayega.")
+            st.caption("IP daalein to URL khud ban jayega.")
             return None
 
         try:
