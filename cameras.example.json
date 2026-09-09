@@ -1,0 +1,32 @@
+{
+  "laptop": {
+    "url": "0",
+    "kind": "usb",
+    "note": "Built-in webcam. Doosra camera ho to \"1\" kar dein."
+  },
+  "phone": {
+    "url": "http://192.168.1.5:8080/video",
+    "kind": "mobile",
+    "note": "Android 'IP Webcam' app — app ka dikhaya IP daalein, aakhir mein /video zaroori hai"
+  },
+  "phone-droidcam": {
+    "url": "http://192.168.1.5:4747/video",
+    "kind": "mobile",
+    "note": "DroidCam app (Android/iPhone) — default port 4747"
+  },
+  "gate": {
+    "url": "rtsp://admin:CHANGE_ME@192.168.1.10:554/stream2",
+    "kind": "cctv",
+    "note": "TP-Link Tapo — stream2 = substream (chhoti resolution, detection ke liye tez)"
+  },
+  "shop-hikvision": {
+    "url": "rtsp://admin:CHANGE_ME@192.168.1.11:554/Streaming/Channels/102",
+    "kind": "cctv",
+    "note": "Hikvision — 101 = main stream, 102 = substream"
+  },
+  "shop-dahua": {
+    "url": "rtsp://admin:CHANGE_ME@192.168.1.12:554/cam/realmonitor?channel=1&subtype=1",
+    "kind": "cctv",
+    "note": "Dahua / CP Plus — subtype=0 main, subtype=1 sub"
+  }
+}

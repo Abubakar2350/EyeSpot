@@ -1,0 +1,12 @@
+# Core dependencies
+ultralytics>=8.3.0        # YOLOv8/YOLOv11 models + inference
+opencv-python>=4.8.0      # Webcam capture, drawing, video I/O
+numpy>=1.24.0             # Array operations
+lap>=0.5.12               # Tracking (ByteTrack/BoT-SORT) ka assignment solver
+
+# Optional — sirf web UI (ui/streamlit_app.py) ke liye
+streamlit>=1.32.0
+
+# Note: torch/torchvision ultralytics ke sath automatically install hote hain.
+# CPU-only machine par (chhota download, ~200MB) ye pehle chalayein:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu

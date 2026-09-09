@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Model weights (auto-download ho jaate hain — repo mein rakhne ki zaroorat nahi)
+models/
+*.pt
+
+# Generated outputs
+outputs/
+
+# Saved camera profiles — CCTV ke passwords hote hain, repo mein NAHI jaani chahiye.
+# Template `cameras.example.json` commit hoti hai.
+cameras.json
+
+# Note: sample.jpg jaan bujh kar commit ki gayi hai — test_smoke.py isi par
+# detection aur tracking test karta hai. Nikaal dein to wo 2 tests skip ho jayenge.
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
