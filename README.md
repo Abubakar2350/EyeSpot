@@ -13,6 +13,9 @@ All 80 COCO classes are supported: `person`, `car`, `dog`, `cat`, `cell phone`,
 > 📹 For connecting a home CCTV camera, whether that setup persists, and what a
 > multi-user version with Google sign-in would require, see
 > **[USER_REPORT_HOME_CCTV.md](USER_REPORT_HOME_CCTV.md)**
+>
+> 🗺️ For what could be built next, sized and prioritised, see
+> **[NEXT_PHASES.md](NEXT_PHASES.md)**
 
 ---
 
@@ -684,12 +687,16 @@ For better accuracy: `--model yolov8s.pt` or `--imgsz 800`.
 
 ## 🔮 Future Enhancements (Phase 2+)
 
-- Training a custom YOLO model on your own dataset (beyond the 80 COCO classes)
-- An alert system (notification / alarm / email when a person is detected)
-- Zone or line-crossing counting ("how many people passed the gate")
+The full roadmap, with each item sized and ordered, is in
+**[NEXT_PHASES.md](NEXT_PHASES.md)**. The headlines:
+
+- **An alert system** — the highest-value gap. EyeSpot shows you what it sees
+  while you watch; alerts would make it watch on your behalf
+- Event history you can review, instead of raw CSV rows
+- Zone and line-crossing counting ("how many people passed the gate")
 - Multiple cameras at once (currently one source at a time)
-- Cloud deployment (AWS / GCP)
-- Face recognition / licence-plate OCR
+- Target lock in the web UI, where it is currently invisible
+- Custom training, for objects outside the 80 COCO classes
 
 > Tracking (ByteTrack/BoT-SORT), target lock and IP/mobile/CCTV camera support
 > were listed as Phase 2 in the PRD — they are **already built**, see above.

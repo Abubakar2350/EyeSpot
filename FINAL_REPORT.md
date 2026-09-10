@@ -3,13 +3,22 @@
 
 | | |
 |---|---|
-| **Report date** | 9 September 2026 |
+| **Report date** | 10 September 2026 |
 | **Status** | Phase 1 complete; deployed |
 | **Repository** | `Abubakar2350/EyeSpot` (private) |
-| **Live app** | `https://eyespot.streamlit.app` |
+| **Live app** | `https://eyespot.streamlit.app` — deployed, currently set to private (see 7.1) |
 | **Specification** | [YOLO_Realtime_Detection_PRD.md](YOLO_Realtime_Detection_PRD.md) |
-| **Code size** | ~3,570 lines across 27 tracked files |
+| **Code size** | ~3,680 lines across 29 tracked files |
 | **Tests** | 18 / 18 passing |
+
+**Companion documents**
+
+| Document | Covers |
+|---|---|
+| [USER_REPORT_HOME_CCTV.md](USER_REPORT_HOME_CCTV.md) | Connecting a home CCTV camera, whether that setup persists, and what a multi-user version with Google sign-in would require |
+| [NEXT_PHASES.md](NEXT_PHASES.md) | What could be built next, sized and prioritised |
+| [LINKEDIN_POSTS.md](LINKEDIN_POSTS.md) | Launch posts for the three demo videos |
+| [README.md](README.md) | Installation, usage, camera setup, troubleshooting |
 
 ---
 
@@ -67,6 +76,7 @@ evaluated and rejected for concrete, measured reasons; section 7 records them.
 | Target lock | Follow one chosen object, with trail and re-acquisition |
 | Saved camera profiles | `--camera gate` instead of retyping credentials |
 | Class groups | `--classes animals` instead of naming ten species |
+| Browser device camera | Photo and live WebRTC from the viewer's own phone — the only camera input that works on a hosted demo |
 
 ### Not built (Phase 2)
 
@@ -216,6 +226,19 @@ EyeSpot/
 │   └── streamlit_app.py      # Web UI — image, video and live camera tabs
 │
 ├── deploy/                   # Hugging Face Space setup (see 7.4)
+│   ├── Dockerfile
+│   ├── Dockerfile.private-source
+│   ├── requirements-hf.txt
+│   ├── README_hf.md
+│   └── deploy_to_hf.py
+│
+├── FINAL_REPORT.md           # This document
+├── USER_REPORT_HOME_CCTV.md  # Home CCTV, persistence, multi-user design
+├── NEXT_PHASES.md            # What to build next
+├── LINKEDIN_POSTS.md         # Launch posts
+├── README.md
+├── YOLO_Realtime_Detection_PRD.md
+│
 ├── models/                   # Weights, downloaded automatically (not in git)
 └── outputs/                  # Screenshots, videos, CSV logs (not in git)
 ```
@@ -245,6 +268,7 @@ exposing the source.
 | Main file | `ui/streamlit_app.py` |
 | URL | `https://eyespot.streamlit.app` |
 | Secret | `EYESPOT_CLOUD = "1"` |
+| Visibility | **Private at the time of writing** — the URL redirects visitors to a Streamlit login page. Making it public is one setting: Share → "Make this app public". |
 
 Three repository files make the hosted build work:
 
@@ -555,8 +579,11 @@ IP/mobile/CCTV camera support, object tracking, target lock, and saved camera
 profiles.
 
 The system is reproducible from a clean machine in five commands, and the web UI
-is live on free hosting with a public link and a private source.
+is deployed on free hosting, serving from a private repository. The hosted demo
+also accepts the viewer's own phone camera through the browser, which is the one
+form of live input a hosted server can legitimately offer.
 
-The natural next steps are an alert system (notify when a person is detected),
-zone and line-crossing counting, and custom training for anything beyond the 80
-COCO classes.
+[NEXT_PHASES.md](NEXT_PHASES.md) sets out what could be built next, sized and
+prioritised. The single highest-value item is an alert system: EyeSpot currently
+shows you what it sees while you watch, and alerts are what would turn it into
+something that watches on your behalf.
