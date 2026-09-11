@@ -92,6 +92,68 @@ def is_cloud() -> bool:
         return False
 
 
+def ice_servers() -> list[dict]:
+    """
+    ICE servers for the browser-camera WebRTC connection.
+
+    Why a TURN server is needed and not just STUN: STUN only helps two peers
+    discover their public addresses so they can talk directly. That works when
+    at least one side is reachable. It fails when both sides sit behind
+    restrictive NAT — which is exactly the common case here, because mobile
+    networks put subscribers behind carrier-grade NAT, and a hosted server has
+    its own restrictions. Neither end can accept an incoming connection, so the
+    direct path never forms and the handshake simply times out.
+
+    TURN solves it by relaying the media through a third machine that both sides
+    *can* reach. It costs bandwidth, which is why it is not the default in most
+    examples, and why leaving it out is such a common mistake.
+
+    Several transports are listed on purpose. UDP is fastest; TCP on port 443
+    is the one that survives firewalls strict enough to block everything that
+    does not look like HTTPS.
+
+    To use your own TURN service instead of the shared free one, put it in
+    Streamlit secrets:
+
+        [webrtc]
+        turn_url = "turn:your.server:3478"
+        turn_username = "user"
+        turn_credential = "pass"
+    """
+    servers: list[dict] = [
+        {"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
+    ]
+
+    # A private TURN service, when one is configured
+    try:
+        webrtc_secrets = st.secrets.get("webrtc", {})
+    except Exception:
+        webrtc_secrets = {}
+
+    if webrtc_secrets.get("turn_url"):
+        servers.append({
+            "urls": [webrtc_secrets["turn_url"]],
+            "username": webrtc_secrets.get("turn_username", ""),
+            "credential": webrtc_secrets.get("turn_credential", ""),
+        })
+        return servers
+
+    # Otherwise fall back to Open Relay, a free shared TURN service. It is rate
+    # limited and shared with everyone, so it is fine for a demo and not for
+    # production traffic.
+    servers.append({
+        "urls": [
+            "turn:openrelay.metered.ca:80",
+            "turn:openrelay.metered.ca:80?transport=tcp",
+            "turn:openrelay.metered.ca:443",
+            "turns:openrelay.metered.ca:443?transport=tcp",
+        ],
+        "username": "openrelayproject",
+        "credential": "openrelayproject",
+    })
+    return servers
+
+
 @st.cache_resource(show_spinner="Loading model...")
 def get_detector(model_name: str, device: str | None):
     """
@@ -582,6 +644,20 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
             "hosting expect a few FPS — lower **Image size** in the sidebar "
             "for a smoother stream."
         )
+        with st.expander("Connection taking a long time?"):
+            st.markdown(
+                "Live video has to negotiate a route between your browser and "
+                "the server, and some networks make that hard.\n\n"
+                "- **Mobile data** is the usual culprit. Carriers place "
+                "subscribers behind a shared NAT, so no direct route exists and "
+                "everything has to be relayed. Wi-Fi normally connects faster.\n"
+                "- **Strict company or campus firewalls** can block the relay too.\n"
+                "- **📸 Photo mode always works.** It sends a single still image "
+                "over ordinary HTTPS with no negotiation at all, so it is "
+                "unaffected by any of this.\n\n"
+                "If live never connects on your network, use Photo mode — you "
+                "lose the continuous stream, not the detection."
+            )
 
         # One detector instance for the whole stream, so track IDs and the
         # motion history behind accident detection survive between frames.
@@ -611,11 +687,18 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
             webrtc_streamer(
                 key="device-camera-live",
                 mode=WebRtcMode.SENDRECV,
-                # A public STUN server lets the phone and the hosted server find
-                # a route to each other across NAT. Without it the connection
-                # only works on a local network.
-                rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-                media_stream_constraints={"video": True, "audio": False},
+                rtc_configuration={"iceServers": ice_servers()},
+                # Ask for a modest resolution. A phone will happily offer 1080p,
+                # which is wasted here — inference runs at 640px anyway — and on
+                # mobile data the extra bitrate is what makes the stream stall.
+                media_stream_constraints={
+                    "video": {
+                        "width": {"ideal": 640},
+                        "height": {"ideal": 480},
+                        "frameRate": {"ideal": 15},
+                    },
+                    "audio": False,
+                },
                 video_frame_callback=video_frame_callback,
             )
         except Exception as exc:

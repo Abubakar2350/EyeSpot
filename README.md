@@ -769,6 +769,26 @@ For better accuracy: `--model yolov8s.pt` or `--imgsz 800`.
 - Install `ffmpeg` — OpenCV cannot write H.264, so the app transcodes with ffmpeg
   for browser playback. Downloads work either way.
 
+**"Connection is taking longer than expected" on the live browser camera**
+- This is WebRTC failing to find a route between your browser and the server.
+  STUN alone only helps when one side is directly reachable; when both sides sit
+  behind restrictive NAT the media has to be relayed by a TURN server, which the
+  app now configures.
+- **Mobile data is the usual cause.** Carriers place subscribers behind
+  carrier-grade NAT, so no direct path exists. Wi-Fi normally connects faster.
+- Strict corporate or campus firewalls can block the relay as well.
+- **📸 Photo mode always works** — it posts a single still over ordinary HTTPS
+  with no negotiation, so none of this applies to it.
+- To use your own TURN service rather than the shared free one, add to Streamlit
+  secrets:
+
+  ```toml
+  [webrtc]
+  turn_url = "turn:your.server:3478"
+  turn_username = "user"
+  turn_credential = "pass"
+  ```
+
 **FPS is very low**
 - Use `--imgsz 320`, or run on a GPU
 
