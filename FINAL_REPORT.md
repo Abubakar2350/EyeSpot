@@ -9,7 +9,7 @@
 | **Live app** | `https://eyespot.streamlit.app` — deployed, currently set to private (see 7.1) |
 | **Specification** | [YOLO_Realtime_Detection_PRD.md](YOLO_Realtime_Detection_PRD.md) |
 | **Code size** | ~3,680 lines across 29 tracked files |
-| **Tests** | 18 / 18 passing |
+| **Tests** | 22 / 22 passing |
 
 **Companion documents**
 
@@ -77,6 +77,7 @@ evaluated and rejected for concrete, measured reasons; section 7 records them.
 | Saved camera profiles | `--camera gate` instead of retyping credentials |
 | Class groups | `--classes animals` instead of naming ten species |
 | Browser device camera | Photo and live WebRTC from the viewer's own phone — the only camera input that works on a hosted demo |
+| Road accident detection | Kinematic anomaly detection over tracked road users, fusing six signals (see 5b) |
 
 ### Not built (Phase 2)
 
@@ -199,6 +200,75 @@ On a GPU (`--device cuda`), expect 30–100+ FPS.
 
 ---
 
+## 5b. Road Accident Detection
+
+Added after the main build, on top of the tracking work rather than beside it.
+
+```
+Detection → Tracking → Kinematics → Signals → Fusion → Event
+```
+
+No additional model is loaded. The engine consumes the tracked detections that
+already exist and does arithmetic on their positions. Measured overhead on this
+machine: **-0.28 ms per frame** — that is, within measurement noise of running
+tracking alone (85.2 FPS tracking only versus 87.2 FPS with the engine attached).
+
+### Six signals, fused
+
+| Signal | Trigger |
+|---|---|
+| `impact` | Boxes overlapping while the pair was closing, with a jolt within 0.6 s |
+| `sudden_stop` | Speed collapsing to under 15% of its recent value |
+| `person_down` | A person's box wider than tall, held for over a second |
+| `hard_brake` | Deceleration past 1.2 object-lengths/s² |
+| `swerve` | Heading changing faster than 2.0 rad/s |
+| `ttc` | Time-to-collision under 0.8 s for a converging pair |
+
+The weights are deliberately set so **no single channel can reach the threshold
+alone**. This is the core design decision: every individual signal has an
+innocent explanation, and only agreement between several distinguishes a crash
+from ordinary traffic.
+
+### Engineering decisions worth recording
+
+**Speeds are normalised by object size.** Pixels per second is meaningless
+across cameras — the same car yields wildly different values depending on
+distance and resolution. Dividing by the object's own diagonal gives
+"object-lengths per second", verified by a test asserting that a 160px and an
+80px vehicle moving at proportionally equal rates report the same figure.
+
+**Impact needs corroboration, not deep overlap.** The first implementation
+scaled the impact signal by how much the boxes overlapped, and never fired:
+colliding vehicles meet edge to edge, producing an IoU around 0.14, not 0.5.
+The channel was restructured so that the corroborating facts — were they
+closing, did one take a jolt — earn most of the strength, with overlap only
+modulating the remainder.
+
+**Deceleration is looked up over a window, not a frame.** An impact and the
+speed change it causes rarely land in the same frame. Requiring both
+simultaneously missed real collisions; a 0.6 s lookback catches them.
+
+**The cooldown started at zero and silenced every clip's opening.** Because the
+clock starts near zero on a fresh video, a zero initial value blocked events for
+the cooldown's whole length — precisely where a dashcam accident usually sits.
+Initialising to negative infinity fixed it, and a test now asserts the first
+event arrives within four seconds.
+
+### What it is not
+
+This is a kinematic anomaly detector. It does **not** include a trained accident
+classifier, a temporal model such as a GRU over behaviour, or any training or
+evaluation on IDD, BDD100K or CCD. Consequently no accuracy figure against a
+labelled benchmark is claimed. A learned classifier would likely outperform
+hand-tuned thresholds and is a reasonable Phase 3 item, but it requires the
+dataset and a training run.
+
+What *is* verified is the geometry and the fusion, by four tests that stage a
+collision, ordinary traffic, isolated hard braking and a long crash sequence,
+and assert which of them fires.
+
+---
+
 ## 6. Architecture
 
 ```
@@ -214,7 +284,8 @@ EyeSpot/
 ├── detector/
 │   ├── model_loader.py       # Model loading, device auto-detection, class groups
 │   ├── detect.py             # Detector — detect(), track(), draw()
-│   └── target_lock.py        # Target lock — follow, trail, LOST/re-acquire, HUD
+│   ├── target_lock.py        # Target lock — follow, trail, LOST/re-acquire, HUD
+│   └── accident.py           # Kinematics, six signals, fusion, event HUD
 │
 ├── utils/
 │   ├── cameras.py            # Camera profiles, brand URL builder, password masking

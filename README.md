@@ -34,6 +34,7 @@ All 80 COCO classes are supported: `person`, `car`, `dog`, `cat`, `cell phone`,
 | Class filter, including group shortcuts (`animals`, `vehicles`) | ✅ |
 | **Object tracking — persistent IDs (ByteTrack / BoT-SORT)** | ✅ |
 | **Target lock — click an object and follow it** | ✅ |
+| **Road accident detection — kinematics + multi-signal fusion** | ✅ |
 | Pause / resume / stop | ✅ |
 | Screenshot capture (`s` key) | ✅ |
 | Annotated video export | ✅ |
@@ -152,6 +153,94 @@ python main.py --log                   # outputs/detections_*.csv
 ```bash
 python main.py --source video.mp4 --no-display --save --log
 ```
+
+---
+
+## 🚨 Road Accident Detection
+
+Watches how tracked road users *move* and raises an event when the motion stops
+looking like traffic. Works on video files, live cameras and CCTV streams alike.
+
+```bash
+python main.py --source traffic.mp4 --accident
+python main.py --camera roadcam --accident --log --save
+python main.py --source dashcam.mp4 --accident --accident-threshold 0.45
+```
+
+In the web UI, turn on **🚨 Accident detection** in the sidebar. It enables
+tracking automatically, because the whole method depends on an object keeping
+the same identity from frame to frame.
+
+### The pipeline
+
+```
+Detection → Tracking → Kinematics → Signals → Fusion → Event
+```
+
+No extra model runs. The engine consumes the tracked detections that already
+exist and does arithmetic on their positions, so the measured overhead is under
+a millisecond per frame — within noise of running tracking alone.
+
+### The six signals
+
+| Signal | What it looks for |
+|---|---|
+| `impact` | Two road users whose boxes overlap while closing on each other |
+| `sudden_stop` | Something moving one moment and stationary the next |
+| `person_down` | A person's box turning from tall to wide, and staying wide |
+| `hard_brake` | Deceleration far beyond normal traffic behaviour |
+| `swerve` | Heading changing faster than steering can explain |
+| `ttc` | Time-to-collision for a converging pair dropping below a threshold |
+
+**No single signal fires an event.** Each one alone has an innocent explanation:
+a car braking at a light, a pedestrian crouching, two vehicles overlapping only
+because one is behind the other. The weights in `config.py` are set so that no
+channel can reach the threshold by itself — several have to agree. That is what
+separates a crash from ordinary traffic, and it is verified by a test that
+staged hard braking on its own and asserts nothing fires.
+
+### Scale normalisation
+
+Speeds are measured in **object lengths per second**, not pixels per second. A
+pixel means nothing on its own — the same car on the same road produces wildly
+different pixel speeds depending on camera distance and resolution. Dividing by
+the object's own diagonal cancels most of that, so one set of thresholds works
+on a dashcam, a CCTV pole and a phone at the roadside.
+
+### Output
+
+Each event writes a row to `outputs/accidents_*.csv` — timestamp, frame, score,
+every individual signal, the track IDs involved — and saves a snapshot of the
+frame. Events are flushed immediately rather than buffered, so nothing is lost
+if the process is killed. A cooldown stops one crash from producing dozens of
+events.
+
+### Tuning
+
+```bash
+python main.py --source clip.mp4 --accident --accident-threshold 0.45   # more sensitive
+python main.py --source clip.mp4 --accident --accident-threshold 0.70   # quieter
+```
+
+Every threshold and weight lives in the accident section of `config.py`.
+
+### What this is, and what it is not
+
+This is a **kinematic anomaly detector**, and it is honest about that:
+
+| Included | Not included |
+|---|---|
+| YOLO detection of vehicles and road users | A trained accident classifier |
+| ByteTrack / BoT-SORT persistent tracking | A temporal model (GRU/LSTM) over behaviour |
+| Speed, acceleration, yaw and TTC | Training or evaluation on IDD / BDD100K / CCD |
+| Multi-channel fusion with debounce and cooldown | Any accuracy figure measured on a labelled benchmark |
+
+A learned classifier trained on a labelled accident dataset would almost
+certainly outperform hand-tuned thresholds, and adding one is a sensible Phase 3
+item. But it needs the dataset and a training run, so it is not claimed here.
+What *is* claimed is the geometry and the fusion, and those are covered by tests
+that stage a collision, ordinary traffic, and isolated hard braking, and assert
+which of the three fires.
 
 ---
 

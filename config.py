@@ -116,6 +116,65 @@ TARGET_LOST_AFTER = 30
 
 
 # ---------------------------------------------------------------------------
+# Accident detection settings
+# ---------------------------------------------------------------------------
+#
+# Speeds and accelerations below are in **object lengths per second**, not
+# pixels. Dividing by an object's own size cancels out camera distance and
+# resolution, so one set of thresholds works on a dashcam, a CCTV pole and a
+# phone at the roadside alike.
+
+# Fused score at which an event is considered. Lower catches more and cries
+# wolf more; higher is quieter but misses marginal cases.
+ACCIDENT_THRESHOLD = 0.55
+
+# Consecutive frames the score must stay above the threshold. Stops a single
+# bad frame — one mislabelled box, one dropped detection — from firing.
+ACCIDENT_PERSISTENCE = 3
+
+# Seconds to stay silent after an event. One crash produces many chaotic
+# frames; without this a single accident would raise dozens of events.
+ACCIDENT_COOLDOWN = 5.0
+
+# How much each channel contributes to the fused score. They sum above 1.0 on
+# purpose: no single channel can reach the threshold alone, but any two strong
+# ones together will. That is the whole point of fusing.
+ACCIDENT_WEIGHTS = {
+    "impact": 0.45,       # boxes overlapping while closing — the clearest sign
+    "sudden_stop": 0.25,  # moving one moment, stationary the next
+    "person_down": 0.25,  # a pedestrian's box gone from tall to wide
+    "hard_brake": 0.20,   # deceleration beyond normal traffic
+    "swerve": 0.20,       # heading changing faster than steering explains
+    "ttc": 0.15,          # a converging pair about to meet
+}
+
+# Deceleration beyond this counts as a hard brake (lengths/s²)
+ACCIDENT_BRAKE_DECEL = 1.2
+
+# Heading change faster than this counts as a swerve (radians/s)
+ACCIDENT_YAW_RATE = 2.0
+
+# Box overlap above this is treated as a possible impact. Kept low on purpose:
+# vehicles that collide rarely overlap much in the image — they meet edge to
+# edge, so their boxes graze rather than merge. Demanding a large overlap would
+# miss most real impacts. The corroborating checks (were they closing, did one
+# take a jolt) are what stop this from firing on every passing car.
+ACCIDENT_IMPACT_IOU = 0.10
+
+# Time-to-collision below this many seconds raises the ttc channel
+ACCIDENT_TTC_SECONDS = 0.8
+
+# An object slower than this is treated as stationary (lengths/s)
+ACCIDENT_MOVING_SPEED = 0.5
+
+# A person's box wider-than-tall by this ratio suggests they are on the ground
+ACCIDENT_PERSON_DOWN_RATIO = 1.1
+
+# ...and must stay that way this long, so crouching is not mistaken for falling
+ACCIDENT_PERSON_DOWN_SECONDS = 1.0
+
+
+# ---------------------------------------------------------------------------
 # UI / drawing settings
 # ---------------------------------------------------------------------------
 

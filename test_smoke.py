@@ -372,6 +372,167 @@ def test_tracking() -> str:
     return f"{len(persistent)} IDs persisted across 4 frames"
 
 
+def _accident_scene(frames, detector=None):
+    """Drive an AccidentDetector through a synthetic scene at a fixed frame rate."""
+    from detector.accident import AccidentDetector
+
+    detector = detector or AccidentDetector()
+    events = []
+    dt = 1 / 25.0
+    for i, dets in enumerate(frames):
+        event = detector.update(dets, i, now=i * dt)
+        if event is not None:
+            events.append(event)
+    return detector, events
+
+
+def _box(cx, cy, w, h):
+    return (int(cx - w / 2), int(cy - h / 2), int(cx + w / 2), int(cy + h / 2))
+
+
+def test_accident_kinematics() -> str:
+    """Speeds must be scale-invariant, and TTC must respect direction."""
+    from detector.accident import TrackState, _time_to_collision
+    from detector.detect import Detection
+
+    def car(tid, cx, cy, w=80, h=60):
+        return Detection(2, "car", 0.9, _box(cx, cy, w, h), track_id=tid)
+
+    # A large and a small object travelling at the same speed *relative to their
+    # own size* should report the same normalised speed. This is what lets one
+    # set of thresholds work on a dashcam and a distant CCTV pole alike.
+    big, small = TrackState(1, "car"), TrackState(2, "car")
+    for i in range(10):
+        t = i / 25.0
+        big.update(car(1, 100 + i * 20, 300, w=160, h=120), t)
+        small.update(car(2, 100 + i * 10, 300, w=80, h=60), t)
+    assert abs(big.speed() - small.speed()) < 0.15, (
+        f"scale normalisation failed: {big.speed():.2f} vs {small.speed():.2f}"
+    )
+
+    # Converging pair: finite positive time-to-collision
+    a, b = TrackState(3, "car"), TrackState(4, "car")
+    for i in range(10):
+        t = i / 25.0
+        a.update(car(3, 100 + i * 8, 300), t)
+        b.update(car(4, 500 - i * 8, 300), t)
+    ttc = _time_to_collision(a, b)
+    assert ttc is not None and ttc > 0, f"converging pair should have a TTC, got {ttc}"
+
+    # Separating pair: no collision is coming, so no TTC
+    c, d = TrackState(5, "car"), TrackState(6, "car")
+    for i in range(10):
+        t = i / 25.0
+        c.update(car(5, 300 - i * 8, 300), t)
+        d.update(car(6, 500 + i * 8, 300), t)
+    assert _time_to_collision(c, d) is None, "separating pair must not report a TTC"
+
+    return f"scale-invariant speed, TTC {ttc:.2f}s converging / None separating"
+
+
+def test_accident_detection() -> str:
+    """A staged collision must fire; ordinary traffic must not."""
+    from detector.detect import Detection
+
+    def car(tid, cx, cy, w=80, h=60):
+        return Detection(2, "car", 0.9, _box(cx, cy, w, h), track_id=tid)
+
+    # --- collision: two vehicles close head-on, then stop dead ---
+    frames = []
+    ax, bx = 200.0, 800.0
+    for _ in range(60):
+        if ax < bx - 70:
+            ax += 9.0
+            bx -= 9.0
+        frames.append([car(1, ax, 300), car(2, bx, 300)])
+    _, events = _accident_scene(frames)
+    assert events, "a staged head-on collision should have fired an event"
+    crash = events[0]
+    assert crash.score >= 0.55, f"score too low: {crash.score}"
+    assert set(crash.track_ids) == {1, 2}, f"both vehicles should be implicated: {crash.track_ids}"
+
+    # --- ordinary traffic: parallel, steady, well separated ---
+    calm = [
+        [car(1, 100 + i * 8, 300), car(2, 150 + i * 8, 450)]
+        for i in range(80)
+    ]
+    _, quiet = _accident_scene(calm)
+    assert not quiet, "steady parallel traffic must not raise an event"
+
+    # --- one hard brake alone must not be enough ---
+    frames = []
+    x, v = 100.0, 14.0
+    for i in range(70):
+        if i > 30:
+            v = max(0.0, v - 2.5)
+        x += v
+        frames.append([car(1, x, 300)])
+    _, braking = _accident_scene(frames)
+    assert not braking, "a single channel must never reach the threshold alone"
+
+    return f"collision fires ({crash.score:.2f}), traffic and braking stay silent"
+
+
+def test_accident_cooldown() -> str:
+    """One crash must produce one event, not one per chaotic frame."""
+    from detector.detect import Detection
+
+    def car(tid, cx, cy):
+        return Detection(2, "car", 0.9, _box(cx, cy, 80, 60), track_id=tid)
+
+    frames = []
+    ax, bx = 200.0, 800.0
+    for _ in range(200):          # 8 seconds at 25 FPS
+        if ax < bx - 70:
+            ax += 9.0
+            bx -= 9.0
+        frames.append([car(1, ax, 300), car(2, bx, 300)])
+
+    detector, events = _accident_scene(frames)
+    duration = len(frames) / 25.0
+    allowed = int(duration / detector.cooldown) + 1
+    assert events, "the collision should still fire once"
+    assert len(events) <= allowed, f"cooldown failed: {len(events)} events in {duration:.0f}s"
+
+    # The cooldown must not silence the opening seconds of a clip, which is
+    # exactly where a dashcam accident usually sits.
+    assert events[0].frame < 25 * 4, f"first event came too late: frame {events[0].frame}"
+
+    return f"{len(events)} event in {duration:.0f}s (max {allowed})"
+
+
+def test_accident_logger() -> str:
+    """Events are written to CSV with a snapshot beside them."""
+    import numpy as np
+
+    from detector.accident import AccidentEvent
+    from utils.save_output import AccidentLogger
+
+    with tempfile.TemporaryDirectory() as tmp:
+        frame = np.full((240, 320, 3), 90, dtype=np.uint8)
+        event = AccidentEvent(
+            frame=42,
+            timestamp=__import__("datetime").datetime.now(),
+            score=0.81,
+            signals={"impact": 0.9, "sudden_stop": 1.0, "hard_brake": 0.4},
+            track_ids=[1, 2],
+            labels=["car", "person"],
+            box=(10, 10, 80, 80),
+        )
+
+        with AccidentLogger(directory=Path(tmp)) as log:
+            snapshot = log.log(event, frame)
+            csv_path = log.path
+
+        assert snapshot is not None and snapshot.exists(), "snapshot was not saved"
+        rows = csv_path.read_text().strip().splitlines()
+        assert len(rows) == 2, f"expected a header plus one event, got {len(rows)}"
+        assert "0.810" in rows[1], "the score is missing from the row"
+        assert "car|person" in rows[1], "the involved labels are missing"
+
+    return "CSV row + snapshot written"
+
+
 def test_target_lock() -> str:
     from detector.detect import Detection
     from detector.target_lock import TargetLock
@@ -450,6 +611,10 @@ TESTS = [
     ("Stream URLs (phone/CCTV)", test_stream_urls),
     ("Camera profiles (cameras.json)", test_camera_profiles),
     ("Object tracking (persistent IDs)", test_tracking),
+    ("Accident kinematics (speed, TTC)", test_accident_kinematics),
+    ("Accident detection (fusion)", test_accident_detection),
+    ("Accident cooldown", test_accident_cooldown),
+    ("Accident event logging", test_accident_logger),
     ("Target lock", test_target_lock),
     ("Target lock drawing", test_lock_drawing),
 ]

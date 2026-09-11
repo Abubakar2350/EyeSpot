@@ -26,7 +26,8 @@ The gaps below were verified against the codebase rather than assumed:
 
 | Capability | Present today |
 |---|---|
-| Alerts / notifications | No code of any kind |
+| Accident detection | **Built** — kinematic anomaly detection, see README |
+| Alerts / notifications | No code of any kind — accidents are logged, but nobody is *told* |
 | Zone or line-crossing counting | None |
 | Multiple cameras at once | No — single source, no threading |
 | Target lock in the web UI | No — CLI only |
@@ -55,8 +56,14 @@ existing codebase with no new infrastructure.
 
 ### 2.1 Alert system · **M** · highest value
 
-The single most valuable thing missing. Detection already works; what is absent
-is anyone being told.
+The single most valuable thing missing, and now more so than before: the
+accident detector already decides that something has happened and writes it to
+a CSV, but nobody is notified. Closing that last step is what makes the whole
+chain useful unattended.
+
+Much of the hard part is already done — the accident engine's debounce,
+persistence and cooldown logic is exactly what a general alert system needs, and
+can be reused rather than rewritten.
 
 - Watch for a class appearing (`person` at night, say)
 - **Debounce it** — this is the real work. Without it, one person standing still
@@ -239,6 +246,7 @@ The ordering is driven by value per unit of effort, and by what unblocks what.
 | 9 | **3.1 / 3.3 / 3.4** | S–M | Pick by need rather than in sequence. |
 | 10 | **4.3 Multi-camera** | L | Wait until single-camera monitoring is genuinely solid. |
 | — | **3.2 Custom training** | L | Only when a specific object demands it. |
+| — | **Learned accident classifier** | L | Would likely beat hand-tuned thresholds, but needs a labelled dataset (IDD / BDD100K / CCD) and a training run. |
 | — | **Phase 5 multi-user** | XL | Only with intent to operate a service. |
 
 ### If only one thing gets built

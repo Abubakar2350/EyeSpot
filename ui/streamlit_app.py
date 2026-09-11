@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
+from detector.accident import AccidentDetector  # noqa: E402
 from detector.detect import Detector, count_by_label  # noqa: E402
 from detector.model_loader import ModelLoadError  # noqa: E402
 from utils.cameras import (  # noqa: E402
@@ -42,6 +43,7 @@ from utils.cameras import (  # noqa: E402
 )
 from utils.fps_counter import FPSCounter  # noqa: E402
 from utils.save_output import (  # noqa: E402
+    AccidentLogger,
     DetectionLogger,
     VideoWriter,
     transcode_for_browser,
@@ -204,6 +206,29 @@ def show_video_result(result: dict) -> None:
             "Download the file below and play it in VLC or any other player."
         )
 
+    accidents = result.get("accidents") or []
+    if result.get("accident_csv") is not None:
+        st.subheader("🚨 Accident detection")
+        if accidents:
+            st.error(f"**{len(accidents)} accident event(s) detected.**")
+            st.dataframe(
+                {
+                    "Time": [f"{a['time']:.1f}s" for a in accidents],
+                    "Frame": [a["frame"] for a in accidents],
+                    "Score": [f"{a['score']:.2f}" for a in accidents],
+                    "Involved": [", ".join(a["labels"]) or "—" for a in accidents],
+                    "Evidence": [a["evidence"] for a in accidents],
+                },
+                width="stretch",
+                hide_index=True,
+            )
+            st.caption(
+                "The **Evidence** column lists the signals that fired and how strongly. "
+                "No single one triggers an event on its own — several have to agree."
+            )
+        else:
+            st.success("No accidents detected in this video.")
+
     st.subheader("What was found across the whole video")
     summary = result["summary"]
     if summary:
@@ -251,17 +276,26 @@ def show_video_result(result: dict) -> None:
                 width="stretch",
             )
 
+    accident_csv = result.get("accident_csv")
+    if accident_csv and Path(accident_csv).exists() and accidents:
+        st.download_button(
+            f"⬇️ Accident report ({len(accidents)} event(s), CSV)",
+            Path(accident_csv).read_bytes(),
+            file_name=Path(accident_csv).name,
+            mime="text/csv",
+        )
+
     st.caption(f"These files are also saved in: `{video_path.parent}`")
 
 
-def tab_video(detector: Detector, tracking: bool = False) -> None:
+def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = False) -> None:
     uploaded = st.file_uploader("Upload a video", type=["mp4", "avi", "mov", "mkv"])
     if uploaded is None:
         st.info("Upload a video file (.mp4 / .avi).")
         return
 
     # Identify each upload, so a different file does not show a stale result
-    job_key = f"{uploaded.name}:{uploaded.size}"
+    job_key = f"{uploaded.name}:{uploaded.size}:{tracking}:{accident_mode}"
     cached = st.session_state.get("video_result")
 
     # Already processed? Then do not run again — show the same result.
@@ -305,6 +339,8 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
 
     writer: VideoWriter | None = None
     det_logger = DetectionLogger(prefix=f"{stem}_detections")
+    accidents = AccidentDetector() if accident_mode else None
+    accident_logger = AccidentLogger(prefix=f"{stem}_accidents") if accident_mode else None
 
     # Totals for the whole video, not just the last frame
     frames_seen: dict[str, int] = {}
@@ -321,6 +357,16 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
             counts = count_by_label(detections)
             detector.draw(frame, detections)
             fps_counter.update()
+
+            if accidents is not None:
+                # Drive the clock from the video's own frame rate rather than
+                # the wall clock: a video processed slower or faster than real
+                # time must still yield the speeds the footage actually shows.
+                stamp = fps_counter.frame_count / (src_fps if src_fps and src_fps > 0 else 25.0)
+                event = accidents.update(detections, fps_counter.frame_count, now=stamp)
+                if event is not None:
+                    accident_logger.log(event, frame)
+                accidents.draw(frame, now=stamp)
 
             for label, count in counts.items():
                 frames_seen[label] = frames_seen.get(label, 0) + count
@@ -354,6 +400,8 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
         if writer is not None:
             writer.release()
         det_logger.close()
+        if accident_logger is not None:
+            accident_logger.close()
         Path(video_path).unlink(missing_ok=True)
 
     progress.empty()
@@ -389,6 +437,17 @@ def tab_video(detector: Detector, tracking: bool = False) -> None:
         "duration": fps_counter.elapsed,
         "tracking": tracking,
         "summary": summary,
+        "accidents": [
+            {
+                "frame": e.frame,
+                "time": e.frame / (src_fps if src_fps and src_fps > 0 else 25.0),
+                "score": e.score,
+                "labels": e.labels,
+                "evidence": e.summary,
+            }
+            for e in (accidents.events if accidents else [])
+        ],
+        "accident_csv": str(accident_logger.path) if accident_logger else None,
     }
     st.rerun()  # render the result view (and stop the loop from running again)
 
@@ -494,7 +553,7 @@ def save_camera_form(url: str, default_kind: str) -> None:
             st.success(f"Saved: **{profile.name}** → `{profile.safe_url}`  •  CLI: `python main.py --camera {profile.name}`")
 
 
-def device_camera_section(detector: Detector) -> None:
+def device_camera_section(detector: Detector, tracking: bool = False, accident_mode: bool = False) -> None:
     """
     Detection on the camera of the device *viewing* the page — a phone's camera,
     a tablet's, a laptop's webcam.
@@ -524,11 +583,24 @@ def device_camera_section(detector: Detector) -> None:
             "for a smoother stream."
         )
 
+        # One detector instance for the whole stream, so track IDs and the
+        # motion history behind accident detection survive between frames.
+        accidents = AccidentDetector() if accident_mode else None
+        counter = {"frame": 0}
+
         def video_frame_callback(frame):
             img = frame.to_ndarray(format="bgr24")
             try:
-                detections = detector.detect(img)
+                if tracking or accidents is not None:
+                    detections = detector.track(img)
+                else:
+                    detections = detector.detect(img)
                 detector.draw(img, detections)
+
+                if accidents is not None:
+                    counter["frame"] += 1
+                    accidents.update(detections, counter["frame"])
+                    accidents.draw(img)
             except Exception:
                 # A failed frame should show as unannotated video, not kill
                 # the stream.
@@ -553,6 +625,12 @@ def device_camera_section(detector: Detector) -> None:
             st.error(f"Live streaming could not start here: {exc}")
             st.caption("Use 📸 Photo mode instead — it needs no streaming support.")
         return
+
+    if accident_mode:
+        st.caption(
+            "🚨 Accident detection needs motion over time, so it applies to **live** "
+            "mode only — a single photo has no speed to measure."
+        )
 
     photo = st.camera_input("Point the camera and take a photo")
     if photo is None:
@@ -588,7 +666,7 @@ def device_camera_section(detector: Detector) -> None:
         )
 
 
-def tab_live(detector: Detector, tracking: bool) -> None:
+def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False) -> None:
     """A saved camera, the local webcam, or a network camera (phone / CCTV / IP)."""
     try:
         saved = load_cameras()
@@ -616,7 +694,7 @@ def tab_live(detector: Detector, tracking: bool) -> None:
     source_type = st.radio("Camera type", choices, horizontal=True)
 
     if source_type == "This device's camera":
-        device_camera_section(detector)
+        device_camera_section(detector, tracking, accident_mode)
         return
 
     if source_type == "Saved camera":
@@ -685,9 +763,11 @@ def tab_live(detector: Detector, tracking: bool) -> None:
         return
 
     frame_slot = st.empty()
+    alert_slot = st.empty()
     stats_slot = st.sidebar.empty()
     counts_slot = st.sidebar.empty()
     fps_counter = FPSCounter()
+    accidents = AccidentDetector() if accident_mode else None
 
     try:
         # Unticking the checkbox re-runs the script, which ends this loop
@@ -701,6 +781,15 @@ def tab_live(detector: Detector, tracking: bool) -> None:
             counts = count_by_label(detections)
             detector.draw(frame, detections)
             fps_counter.update()
+
+            if accidents is not None:
+                event = accidents.update(detections, fps_counter.frame_count)
+                if event is not None:
+                    alert_slot.error(
+                        f"🚨 **Accident detected** at frame {event.frame} — "
+                        f"score {event.score:.2f} · {event.summary}"
+                    )
+                accidents.draw(frame)
 
             frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
             stats_slot.metric("FPS", f"{fps_counter.value:.1f}", f"{len(detections)} objects")
@@ -737,15 +826,27 @@ def main() -> None:
         value=False,
         help="Gives every object a persistent ID that stays the same across frames.",
     )
+    accident_mode = st.sidebar.toggle(
+        "🚨 Accident detection",
+        value=False,
+        help=(
+            "Watches how tracked road users move and raises an event when the "
+            "motion stops looking like traffic. Needs tracking, so it turns it on."
+        ),
+    )
+    if accident_mode:
+        tracking = True
+        st.sidebar.caption("Tracking enabled automatically — accident detection needs persistent IDs.")
+
     st.sidebar.caption(f"Device: `{detector.device}`  •  Classes: {len(detector.class_names)}")
 
     image_tab, video_tab, live_tab = st.tabs(["🖼️ Image", "🎬 Video", "📷 Live camera"])
     with image_tab:
         tab_image(detector)
     with video_tab:
-        tab_video(detector, tracking)
+        tab_video(detector, tracking, accident_mode)
     with live_tab:
-        tab_live(detector, tracking)
+        tab_live(detector, tracking, accident_mode)
 
 
 if __name__ == "__main__":

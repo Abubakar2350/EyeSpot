@@ -21,6 +21,11 @@ Saved cameras (so the full URL need not be retyped):
     python main.py --camera phone               # the name is now enough
     python main.py --list-cameras               # show every saved camera
 
+Accident detection (road video, CCTV, live camera):
+    python main.py --source traffic.mp4 --accident
+    python main.py --camera roadcam --accident --log
+    python main.py --source dashcam.mp4 --accident --accident-threshold 0.45
+
 Tracking and target lock:
     python main.py --track                      # give every object a persistent ID
     python main.py --track --lock person        # lock onto the first person seen
@@ -45,6 +50,7 @@ from pathlib import Path
 import cv2
 
 import config
+from detector.accident import AccidentDetector
 from detector.detect import Detector, count_by_label
 from detector.model_loader import ModelLoadError
 from detector.target_lock import TargetLock
@@ -58,7 +64,7 @@ from utils.cameras import (
 )
 from utils.fps_counter import FPSCounter
 from utils.overlay import draw_help_bar, draw_overlay
-from utils.save_output import DetectionLogger, VideoWriter, save_screenshot
+from utils.save_output import AccidentLogger, DetectionLogger, VideoWriter, save_screenshot
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 
@@ -140,6 +146,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--lock-id", type=int, default=None, metavar="ID",
         help="Lock onto this track ID (e.g. --lock-id 3)",
+    )
+
+    # -- accident detection --
+    parser.add_argument(
+        "--accident", action="store_true",
+        help="Detect road accidents from motion (implies --track, since it needs persistent IDs)",
+    )
+    parser.add_argument(
+        "--accident-threshold", type=float, default=None, metavar="SCORE",
+        help=f"Fused score that triggers an event (default: {config.ACCIDENT_THRESHOLD})",
     )
 
     parser.add_argument("--save", action="store_true", help="Save the annotated video/image")
@@ -359,7 +375,9 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
     detections: list = []
 
     # Tracking / target lock state
-    tracking = args.track or args.lock is not None or args.lock_id is not None
+    # Accident detection is built on kinematics, and kinematics need an object
+    # to keep the same identity between frames — so it implies tracking.
+    tracking = args.track or args.lock is not None or args.lock_id is not None or args.accident
     target_lock = TargetLock(
         trail_length=config.TRAIL_LENGTH,
         lost_after=config.TARGET_LOST_AFTER,
@@ -367,6 +385,13 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
     if args.lock_id is not None:
         target_lock.lock(args.lock_id)
     pending_auto_lock = args.lock  # on the first frame, find this class and lock onto it
+
+    accidents: AccidentDetector | None = None
+    accident_logger: AccidentLogger | None = None
+    if args.accident:
+        accidents = AccidentDetector(threshold=args.accident_threshold)
+        accident_logger = AccidentLogger(directory=out_dir)
+        saved_paths.append(accident_logger.path)
 
     if args.log or config.ENABLE_CSV_LOG:
         det_logger = DetectionLogger(
@@ -385,6 +410,8 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
         print(f"Class filter: {', '.join(detector.class_filter_names)}")
     if tracking:
         print(f"Tracking: ON ({detector.tracker})")
+    if accidents is not None:
+        print(f"Accident detection: ON (threshold {accidents.threshold:.2f})")
     if args.lock:
         print(f"Auto-lock: first '{args.lock}'")
     if args.lock_id is not None:
@@ -454,6 +481,20 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                 detector.draw(frame, detections, dim_ids=dim_ids)
                 target_lock.draw(frame, target)
 
+                if accidents is not None:
+                    event = accidents.update(detections, fps_counter.frame_count)
+                    if event is not None:
+                        # Snapshot the annotated frame before the banner is drawn
+                        # over it, so the saved image shows the scene clearly.
+                        snapshot = accident_logger.log(event, frame)
+                        print(
+                            f"\n  ⚠ ACCIDENT  frame {event.frame}  score {event.score:.2f}"
+                            f"  [{event.summary}]"
+                        )
+                        if snapshot:
+                            print(f"    snapshot: {snapshot}")
+                    accidents.draw(frame)
+
                 if det_logger is not None:
                     det_logger.log(fps_counter.frame_count, detections)
 
@@ -495,6 +536,8 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                 extra = []
                 if tracking:
                     extra.append(target_lock.status_line())
+                if accidents is not None:
+                    extra.append(accidents.status_line())
                 draw_overlay(
                     display_frame,
                     fps_counter.value,
@@ -556,11 +599,17 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
         if det_logger is not None:
             det_logger.close()
             saved_paths.append(det_logger.path)
+        if accident_logger is not None:
+            accident_logger.close()
         if not args.no_display:
             cv2.destroyAllWindows()
 
     if args.no_display and total_frames:
         print()  # newline after the progress line
+    if accidents is not None:
+        print(f"\n  Accident events: {len(accidents.events)}")
+        for event in accidents.events:
+            print(f"    frame {event.frame:>6}  score {event.score:.2f}  [{event.summary}]")
     print_summary(counts, fps_counter, saved_paths)
     return 0
 

@@ -161,6 +161,90 @@ class VideoWriter:
         self.release()
 
 
+class AccidentLogger:
+    """
+    Records accident events: one CSV row per event, plus a snapshot of the frame.
+
+    Kept separate from DetectionLogger because the two answer different
+    questions. The detection log is a firehose — every object in every frame —
+    while this is an incident report, and there should be very few of them. You
+    read one by opening the snapshot, not by filtering forty thousand rows.
+    """
+
+    HEADER = [
+        "timestamp", "frame", "score", "labels", "track_ids",
+        "impact", "sudden_stop", "person_down", "hard_brake", "swerve", "ttc",
+        "snapshot",
+    ]
+
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        prefix: str = "accidents",
+        directory: Path | None = None,
+    ) -> None:
+        self.directory = _ensure_output_dir(directory)
+        if path is None:
+            path = self.directory / f"{prefix}_{_timestamp()}.csv"
+
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.events_written = 0
+
+        self._file = open(self.path, "w", newline="", encoding="utf-8")
+        self._writer = csv.writer(self._file)
+        self._writer.writerow(self.HEADER)
+        self._file.flush()
+
+        logger.info("Accident log: %s", self.path)
+
+    def log(self, event, frame: np.ndarray | None = None) -> Path | None:
+        """
+        Write one event. When a frame is supplied, a snapshot is saved alongside
+        and its path recorded in the row.
+        """
+        snapshot: Path | None = None
+        if frame is not None:
+            snapshot = save_screenshot(
+                frame,
+                prefix=f"accident_f{event.frame}",
+                directory=self.directory,
+            )
+
+        signals = event.signals
+        self._writer.writerow([
+            event.timestamp.isoformat(timespec="milliseconds"),
+            event.frame,
+            f"{event.score:.3f}",
+            "|".join(event.labels),
+            "|".join(str(t) for t in event.track_ids),
+            f"{signals.get('impact', 0.0):.3f}",
+            f"{signals.get('sudden_stop', 0.0):.3f}",
+            f"{signals.get('person_down', 0.0):.3f}",
+            f"{signals.get('hard_brake', 0.0):.3f}",
+            f"{signals.get('swerve', 0.0):.3f}",
+            f"{signals.get('ttc', 0.0):.3f}",
+            str(snapshot) if snapshot else "",
+        ])
+        # Events are rare and important — flush immediately rather than
+        # buffering, so nothing is lost if the process is killed.
+        self._file.flush()
+        self.events_written += 1
+        return snapshot
+
+    def close(self) -> None:
+        if self._file and not self._file.closed:
+            self._file.flush()
+            self._file.close()
+            logger.info("Accident log saved: %s (%d event(s))", self.path, self.events_written)
+
+    def __enter__(self) -> "AccidentLogger":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+
 class DetectionLogger:
     """
     Writes every detection to a CSV: timestamp, frame, object, confidence, box.
