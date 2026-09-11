@@ -163,16 +163,82 @@ def get_detector(model_name: str, device: str | None):
     return Detector(model_name=model_name, device=device)
 
 
+IMAGE_SIZES = [320, 416, 512, 640, 800, 960, 1280]
+
+
 def sidebar_controls() -> dict:
+    """
+    Render the sidebar and return the settings actually in force.
+
+    Accident detection is asked about *before* the detection sliders, because it
+    dictates what they should be. When it is on, the sliders show the preset's
+    values and are disabled rather than being silently overridden — an earlier
+    version left them displaying whatever the user had chosen while the app ran
+    on different numbers entirely, which is worse than having no sliders at all.
+    """
     st.sidebar.title("⚙️ Settings")
 
-    model_name = st.sidebar.selectbox("Model", MODEL_CHOICES, index=0)
     device = st.sidebar.selectbox("Device", ["auto", "cpu", "cuda", "mps"], index=0)
 
     st.sidebar.divider()
-    confidence = st.sidebar.slider("Confidence threshold", 0.05, 0.95, config.CONFIDENCE_THRESHOLD, 0.05)
-    iou = st.sidebar.slider("IoU (NMS) threshold", 0.1, 0.9, config.IOU_THRESHOLD, 0.05)
-    imgsz = st.sidebar.select_slider("Image size", [320, 416, 512, 640, 800], value=config.IMAGE_SIZE)
+    st.sidebar.markdown("### 🚨 Accident detection")
+    accident_mode = st.sidebar.toggle(
+        "Detect road accidents",
+        value=False,
+        help=(
+            "Watches how tracked road users move and raises an event when the "
+            "motion stops looking like traffic."
+        ),
+    )
+
+    sensitivity = "medium"
+    preset = None
+    if accident_mode:
+        sensitivity = st.sidebar.select_slider(
+            "Sensitivity",
+            options=["low", "medium", "high", "max"],
+            value="medium",
+            help=(
+                "low: only unambiguous events. max: finds the most, including "
+                "small distant vehicles — much slower, meant for reviewing "
+                "recorded footage rather than a live camera."
+            ),
+        )
+        preset = config.ACCIDENT_SENSITIVITY[sensitivity]
+
+    st.sidebar.divider()
+
+    # The model the preset wants, chosen for the user rather than nagged about
+    wanted_model = (preset or {}).get("model")
+    if wanted_model and wanted_model in MODEL_CHOICES:
+        model_name = wanted_model
+        st.sidebar.selectbox(
+            "Model", MODEL_CHOICES, index=MODEL_CHOICES.index(wanted_model), disabled=True,
+            help=f"Set by the {sensitivity} preset.",
+        )
+    else:
+        model_name = st.sidebar.selectbox("Model", MODEL_CHOICES, index=0)
+
+    if preset:
+        # Show what is in force, and lock it, so the numbers on screen are the
+        # numbers being used.
+        confidence = preset["confidence"]
+        imgsz = preset["imgsz"]
+        st.sidebar.slider(
+            "Confidence threshold", 0.05, 0.95, confidence, 0.05, disabled=True,
+            help=f"Set by the {sensitivity} preset — accident detection needs stable tracks.",
+        )
+        iou = st.sidebar.slider("IoU (NMS) threshold", 0.1, 0.9, config.IOU_THRESHOLD, 0.05)
+        st.sidebar.select_slider(
+            "Image size", IMAGE_SIZES, value=imgsz, disabled=True,
+            help=f"Set by the {sensitivity} preset.",
+        )
+    else:
+        confidence = st.sidebar.slider(
+            "Confidence threshold", 0.05, 0.95, config.CONFIDENCE_THRESHOLD, 0.05
+        )
+        iou = st.sidebar.slider("IoU (NMS) threshold", 0.1, 0.9, config.IOU_THRESHOLD, 0.05)
+        imgsz = st.sidebar.select_slider("Image size", IMAGE_SIZES, value=config.IMAGE_SIZE)
 
     return {
         "model_name": model_name,
@@ -180,6 +246,8 @@ def sidebar_controls() -> dict:
         "confidence": confidence,
         "iou": iou,
         "imgsz": imgsz,
+        "accident_mode": accident_mode,
+        "accident_sensitivity": sensitivity,
     }
 
 
@@ -923,55 +991,38 @@ def main() -> None:
         options=detector.class_names,
         default=[],
     )
-    apply_settings(detector, settings, class_filter)
 
+    accident_mode = settings["accident_mode"]
+    accident_sensitivity = settings["accident_sensitivity"]
+
+    # Accident detection is built on motion between frames, so objects must keep
+    # the same track ID — it turns tracking on rather than failing quietly.
     tracking = st.sidebar.toggle(
         "Object tracking",
-        value=False,
-        help="Gives every object a persistent ID that stays the same across frames.",
-    )
-    accident_mode = st.sidebar.toggle(
-        "🚨 Accident detection",
-        value=False,
+        value=accident_mode,
+        disabled=accident_mode,
         help=(
-            "Watches how tracked road users move and raises an event when the "
-            "motion stops looking like traffic. Needs tracking, so it turns it on."
+            "Gives every object a persistent ID that stays the same across frames. "
+            "Required by accident detection, which is why it is locked on above."
         ),
     )
-    accident_sensitivity = "medium"
     if accident_mode:
-        accident_sensitivity = st.sidebar.select_slider(
-            "Accident sensitivity",
-            options=["low", "medium", "high", "max"],
-            value="medium",
-            help=(
-                "low: only unambiguous events. high: catches more, with roughly "
-                "twice the false alarms. max: also raises the model size and "
-                "inference resolution to find small distant vehicles — much "
-                "slower, meant for reviewing recorded footage rather than a "
-                "live camera."
-            ),
-        )
         tracking = True
-        # Accident detection reads motion between frames, which needs objects to
-        # hold the same track ID. Marginal detections flicker and break that, so
-        # the confidence threshold is lowered here unless the user has already
-        # moved it below the recommended ceiling themselves.
+
+    apply_settings(detector, settings, class_filter)
+
+    if accident_mode:
         preset = config.ACCIDENT_SENSITIVITY[accident_sensitivity]
-        settings["confidence"] = min(settings["confidence"], preset["confidence"])
-        settings["imgsz"] = max(settings["imgsz"], preset["imgsz"])
-        apply_settings(detector, settings, class_filter)
-        st.sidebar.info(
-            f"Tracking on, confidence **{settings['confidence']:.2f}**, image size "
-            f"**{settings['imgsz']}**. Accident detection reads motion between "
-            "frames, so objects must keep the same ID — detections near the usual "
-            "0.5 threshold flicker in and out and reset their history."
+        st.sidebar.success(
+            f"**Accident detection is on** — `{settings['model_name']}`, "
+            f"confidence {settings['confidence']:.2f}, image size {settings['imgsz']}, "
+            f"tracking on. Upload a video in the **🎬 Video** tab and press "
+            f"**Start detection**."
         )
-        if preset["model"]:
+        if accident_sensitivity == "max":
             st.sidebar.warning(
-                f"**max** also wants `{preset['model']}` at image size {preset['imgsz']}. "
-                "Pick that model above for the full effect — it is considerably "
-                "slower, and meant for reviewing footage rather than a live camera."
+                "**max** is deliberately slow — roughly 7x the processing time. "
+                "Use it for reviewing recorded footage, not a live camera."
             )
 
     st.sidebar.caption(f"Device: `{detector.device}`  •  Classes: {len(detector.class_names)}")
