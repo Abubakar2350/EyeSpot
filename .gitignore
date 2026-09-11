@@ -11,6 +11,8 @@ models/
 
 # Generated outputs
 outputs/
+# Annotated result videos dropped in the project root
+*result*.mp4
 
 # Saved camera profiles — these contain CCTV passwords and must NOT be committed.
 # The template `cameras.example.json` is committed instead.
