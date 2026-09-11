@@ -5,6 +5,7 @@ numpy>=1.24.0             # Array operations
 lap>=0.5.12               # Assignment solver for tracking (ByteTrack/BoT-SORT)
 streamlit>=1.63.0         # Web UI
 streamlit-webrtc>=0.77    # Live detection from the viewer's own browser camera
+open-clip-torch>=3.0      # Visual crash verification (CLIP, zero-shot) for accident mode
 
 # PyTorch, pinned to the CPU build.
 #

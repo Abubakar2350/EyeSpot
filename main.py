@@ -512,7 +512,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                         if kind == "video" and src_fps and src_fps > 0
                         else None
                     )
-                    event = accidents.update(detections, fps_counter.frame_count, now=stamp)
+                    event = accidents.update(detections, fps_counter.frame_count, now=stamp, frame=frame)
                     if event is not None:
                         # Snapshot the annotated frame before the banner is drawn
                         # over it, so the saved image shows the scene clearly.

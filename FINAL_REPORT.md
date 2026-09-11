@@ -367,6 +367,26 @@ slow. A wrecked car is frequently hidden behind the vehicle that hit it, behind
 a gathering crowd, or by the shot cutting away, and insisting it stay visible
 discarded those cases.
 
+### A trained pair of eyes
+
+The final layer answered the request that the system should *see* accidents
+rather than infer them from braking: every candidate is now shown to CLIP
+(ViT-B/32, zero-shot), which scores the scene against crash and normal-traffic
+descriptions. Evaluated on the footage before integration: wreck scenes
+0.71–0.99, plain traffic 0.09–0.27, and the frame the kinematics had wrongly
+flagged 0.27 — which the verifier now vetoes.
+
+Its verdict outranks the kinematics both ways — plain wreckage confirms even if
+the tracker lost the vehicles; plainly normal traffic vetoes even though
+vehicles stopped. Both the full frame and an enlarged crop of the event region
+are scored, the higher winning, after a real side-impact far from the camera
+measured 0.17 full-frame but 0.53 cropped while a false alarm stayed below the
+veto line under both views.
+
+This is zero-shot CLIP, not a network fine-tuned on accident datasets; that
+distinction is kept explicit in every claim, and fine-tuning remains the
+obvious Phase 3 upgrade.
+
 What cannot be promised: an accident outside the frame, fully occluded, or
 involving the camera vehicle itself is invisible to any of this. `max` is the
 setting that misses least on the footage it was measured against, not a

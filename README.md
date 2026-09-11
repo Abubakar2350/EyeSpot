@@ -192,6 +192,40 @@ a millisecond per frame — within noise of running tracking alone.
 | `swerve` | Heading changing faster than steering can explain |
 | `ttc` | Time-to-collision for a converging pair dropping below a threshold |
 
+### Visual verification — a trained model that looks at the scene
+
+Kinematics can only answer "did the motion look like a crash?" — and motion
+cannot tell a collision from a hard stop at a red light. So every candidate is
+also shown to **CLIP**, a neural network trained on hundreds of millions of
+image-text pairs, which answers the other question: *does the picture look like
+a crash?* Wreckage, debris on the road, a person on the ground — visual facts
+that trajectory arithmetic cannot see.
+
+Measured on the test footage before being trusted:
+
+| Scene | CLIP crash score |
+|---|---|
+| Debris field, wrecked cars | 0.96–0.99 |
+| Fresh collision | 0.71–0.93 |
+| Ordinary traffic that the kinematics had *wrongly* flagged | **0.27 — vetoed** |
+| Plain traffic / empty road | 0.09–0.27 |
+
+The verdict outranks the kinematics in both directions: a scene that plainly
+shows a wreck confirms the event even if the tracker lost the vehicles, and a
+scene that plainly shows normal traffic vetoes it even though vehicles stopped —
+a queue at a signal stops too.
+
+Two views are scored and the higher wins: the full frame for context, and an
+enlarged crop of the event region — because a real side-impact far from the
+camera scored 0.17 full-frame and 0.53 cropped, while a false alarm stayed low
+under both. CLIP runs only on candidates (a handful per video), so it adds a few
+hundred milliseconds per event, not per frame.
+
+Honesty note: this is zero-shot CLIP, not a model fine-tuned on accident
+datasets such as CCD or BDD100K. Fine-tuning would likely beat it and remains
+the Phase 3 path. If `open-clip-torch` is not installed the verifier simply
+stays off and confirmation falls back to pure kinematics.
+
 ### Confirmation — the step that separates a crash from a near miss
 
 A candidate is **not announced immediately**. The vehicles involved are watched
@@ -323,13 +357,16 @@ into **six distinguishable accident clips**, which serve as rough ground truth:
 
 | Setting | Clips found | Extra events |
 |---|---|---|
-| Before confirmation, threshold 0.55 | 3 of 6 | +2 |
-| Before confirmation, threshold 0.50 | 5 of 6 | +3 |
-| With confirmation, threshold 0.50 (medium) | 5 of 6 | +1 |
-| **With confirmation, `max` preset** | **6 of 6** | **+3** |
+| Kinematics only, threshold 0.55 | 3 of 6 | +2 |
+| Kinematics only, threshold 0.50 | 5 of 6 | +3 |
+| + stop confirmation (medium) | 5 of 6 | +1 |
+| + visual verification (medium) | 5 of 6 | +1 |
+| **+ visual verification (`max`)** | **6 of 6** | **+3** |
 
-Confirmation cut the false alarms to a third without losing an accident; the
-`max` preset then closed the last gap by fixing detection rather than scoring.
+Each layer earned its place: confirmation cut the false alarms to a third,
+the `max` preset recovered the small-and-distant accidents, and the visual
+verifier now attaches trained-model evidence to every event — the `max` run's
+events carry visual scores of 0.52–0.99.
 
 The clip that no threshold could reach — a night-time junction filmed wide, with
 vehicles a few pixels across — is now caught by the `max` preset, which raises

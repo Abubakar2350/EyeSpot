@@ -172,7 +172,7 @@ class AccidentLogger:
     """
 
     HEADER = [
-        "timestamp", "frame", "score", "labels", "track_ids",
+        "timestamp", "frame", "score", "visual", "labels", "track_ids",
         "impact", "sudden_stop", "person_down", "hard_brake", "swerve", "ttc",
         "snapshot",
     ]
@@ -216,6 +216,7 @@ class AccidentLogger:
             event.timestamp.isoformat(timespec="milliseconds"),
             event.frame,
             f"{event.score:.3f}",
+            f"{event.visual_score:.3f}" if getattr(event, "visual_score", None) is not None else "",
             "|".join(event.labels),
             "|".join(str(t) for t in event.track_ids),
             f"{signals.get('impact', 0.0):.3f}",

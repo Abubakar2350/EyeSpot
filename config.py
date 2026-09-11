@@ -220,6 +220,26 @@ ACCIDENT_CONFIRM_MAX_SPEED = 0.4
 # quieter presets leave it off.
 ACCIDENT_CONFIRM_ON_VANISH = True
 
+# Visual verification of candidates (CLIP, zero-shot).
+#
+# Kinematics answer "did the motion look like a crash?" — which cannot tell a
+# collision from a hard stop at a signal. The verifier answers "does the
+# *picture* look like a crash?": wreckage, debris, a person on the ground.
+# Measured on real footage before being trusted: clear wreck scenes scored
+# 0.71-0.96, clear normal traffic 0.09-0.27, and a frame the kinematics had
+# wrongly flagged scored 0.27.
+ACCIDENT_VISUAL_ENABLED = True
+
+# At or above this, the scene visually confirms the candidate outright
+ACCIDENT_VISUAL_CONFIRM = 0.60
+
+# At or below this, the scene is visually normal and the candidate is rejected
+# even if vehicles stopped — a queue at a red light stops too
+ACCIDENT_VISUAL_REJECT = 0.35
+
+# How often to sample a frame for the verifier while a candidate is pending
+ACCIDENT_VISUAL_INTERVAL = 0.7
+
 # Seconds to stay silent after an event. One crash produces many chaotic
 # frames; without this a single accident would raise dozens of events.
 ACCIDENT_COOLDOWN = 5.0

@@ -514,7 +514,7 @@ def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = 
                 # the wall clock: a video processed slower or faster than real
                 # time must still yield the speeds the footage actually shows.
                 stamp = fps_counter.frame_count / (src_fps if src_fps and src_fps > 0 else 25.0)
-                event = accidents.update(detections, fps_counter.frame_count, now=stamp)
+                event = accidents.update(detections, fps_counter.frame_count, now=stamp, frame=frame)
                 if event is not None:
                     accident_logger.log(event, frame)
                 accidents.draw(frame, now=stamp, detections=detections)
@@ -764,7 +764,7 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
 
                 if accidents is not None:
                     counter["frame"] += 1
-                    accidents.update(detections, counter["frame"])
+                    accidents.update(detections, counter["frame"], frame=img)
                     accidents.draw(img, detections=detections)
             except Exception:
                 # A failed frame should show as unannotated video, not kill
@@ -955,7 +955,7 @@ def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False, se
             fps_counter.update()
 
             if accidents is not None:
-                event = accidents.update(detections, fps_counter.frame_count)
+                event = accidents.update(detections, fps_counter.frame_count, frame=frame)
                 if event is not None:
                     alert_slot.error(
                         f"🚨 **Accident detected** at frame {event.frame} — "

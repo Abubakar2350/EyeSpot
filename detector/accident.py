@@ -272,6 +272,9 @@ class PendingEvent:
     labels: list[str]
     box: tuple[int, int, int, int]
     raised_at: float
+    # Crash-likeness scores from the visual verifier, sampled over the window
+    visual_scores: list = field(default_factory=list)
+    last_visual_at: float = -1e9
 
 
 @dataclass
@@ -287,6 +290,8 @@ class AccidentEvent:
     box: tuple[int, int, int, int]
     # Seconds the involved vehicles stayed put before this was accepted
     confirmed_after: float = 0.0
+    # Best crash-likeness the visual verifier saw, or None if it never ran
+    visual_score: float | None = None
 
     @property
     def summary(self) -> str:
@@ -295,7 +300,10 @@ class AccidentEvent:
             ((name, value) for name, value in self.signals.items() if value > 0.05),
             key=lambda kv: -kv[1],
         )
-        return ", ".join(f"{name} {value:.2f}" for name, value in firing) or "—"
+        text = ", ".join(f"{name} {value:.2f}" for name, value in firing) or "—"
+        if self.visual_score is not None:
+            text += f", visual {self.visual_score:.2f}"
+        return text
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +327,7 @@ class AccidentDetector:
         persistence: int | None = None,
         cooldown: float | None = None,
         weights: dict[str, float] | None = None,
+        verifier=None,
     ) -> None:
         self.threshold = threshold if threshold is not None else config.ACCIDENT_THRESHOLD
         self.persistence = persistence if persistence is not None else config.ACCIDENT_PERSISTENCE
@@ -327,6 +336,17 @@ class AccidentDetector:
 
         self.tracks: dict[int, TrackState] = {}
         self.events: list[AccidentEvent] = []
+        # The trained pair of eyes. Lazy: nothing loads until the first
+        # candidate needs checking, and if it cannot load the review falls
+        # back to pure kinematic confirmation.
+        if verifier is not None:
+            self.verifier = verifier
+        elif config.ACCIDENT_VISUAL_ENABLED:
+            from .visual_check import CrashVerifier
+
+            self.verifier = CrashVerifier.get()
+        else:
+            self.verifier = None
         # A candidate waiting to be accepted or discarded
         self.pending: PendingEvent | None = None
         # Track IDs confirmed as having crashed. These stay marked for the rest
@@ -363,6 +383,7 @@ class AccidentDetector:
         detections: list[Detection],
         frame_index: int,
         now: float | None = None,
+        frame: np.ndarray | None = None,
     ) -> AccidentEvent | None:
         """
         Feed one frame's detections. Returns an AccidentEvent when one fires,
@@ -408,6 +429,20 @@ class AccidentDetector:
         # flicker precisely when the collision makes them hard to see.
         self._recent_hits.append(score >= self.threshold)
         self._above_threshold = sum(self._recent_hits)
+
+        # While a candidate is under review, let the verifier look at the scene
+        # a few times across the window — the wreckage is often clearer a moment
+        # after the impact than during it.
+        if (
+            self.pending is not None
+            and frame is not None
+            and self.verifier is not None
+            and now - self.pending.last_visual_at >= config.ACCIDENT_VISUAL_INTERVAL
+        ):
+            score = self.verifier.crash_probability(frame, box=self.pending.box)
+            if score is not None:
+                self.pending.visual_scores.append(score)
+            self.pending.last_visual_at = now
 
         # A candidate already under review takes precedence over raising another
         confirmed = self._review_pending(now, frame_index)
@@ -468,6 +503,20 @@ class AccidentDetector:
 
         pending, self.pending = self.pending, None
 
+        # The visual verdict outranks the kinematic one in both directions,
+        # because it sees things motion cannot. A scene that plainly shows
+        # wreckage is a crash even if the tracker lost the vehicles; a scene
+        # that plainly shows ordinary traffic is not a crash even though cars
+        # stopped — a queue at a red light stops too.
+        visual = max(pending.visual_scores) if pending.visual_scores else None
+        if visual is not None:
+            if visual <= config.ACCIDENT_VISUAL_REJECT:
+                return None
+            if visual >= config.ACCIDENT_VISUAL_CONFIRM and not stopped:
+                # Visually confirmed without a measurable stop — mark whoever
+                # was implicated, since the tracker has nothing better.
+                stopped = list(pending.track_ids)
+
         if not stopped:
             # Everyone drove on: a near miss, not a crash.
             return None
@@ -483,6 +532,7 @@ class AccidentDetector:
             }) or pending.labels,
             box=pending.box,
             confirmed_after=waited,
+            visual_score=visual,
         )
         self._last_event_time = now
         self._banner_until = now + 3.0

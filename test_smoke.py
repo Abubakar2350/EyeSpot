@@ -514,6 +514,77 @@ def test_accident_confirmation() -> str:
     return f"crash confirms after {events[0].confirmed_after:.1f}s; near miss discarded"
 
 
+def test_accident_visual_verifier() -> str:
+    """The visual verdict outranks kinematics in both directions."""
+    import numpy as np
+
+    from detector.accident import AccidentDetector
+    from detector.detect import Detection
+
+    class FakeVerifier:
+        def __init__(self, score):
+            self.score = score
+            self.calls = 0
+
+        def crash_probability(self, frame, box=None):
+            self.calls += 1
+            return self.score
+
+    def car(tid, cx, cy=300):
+        return Detection(2, "car", 0.9, _box(cx, cy, 80, 60), track_id=tid)
+
+    frame = np.zeros((360, 640, 3), dtype=np.uint8)
+    dt = 1 / 25.0
+
+    def crash_frames():
+        out = []
+        ax, bx = 200.0, 800.0
+        for _ in range(220):
+            if ax < bx - 70:
+                ax += 9.0
+                bx -= 9.0
+            out.append([car(1, ax), car(2, bx)])
+        return out
+
+    # Kinematics say crash and vehicles stop — but the scene looks like plain
+    # traffic. A queue at a red light stops too; the verifier must veto it.
+    veto = FakeVerifier(0.10)
+    det = AccidentDetector(verifier=veto)
+    events = []
+    for i, dets in enumerate(crash_frames()):
+        e = det.update(dets, i, now=i * dt, frame=frame)
+        if e:
+            events.append(e)
+    assert veto.calls > 0, "the verifier was never consulted"
+    assert not events, "a visually-normal scene must be rejected despite the stop"
+
+    # Same kinematics, but the scene plainly shows a wreck: confirmed, and the
+    # verdict is recorded on the event.
+    confirm = FakeVerifier(0.90)
+    det = AccidentDetector(verifier=confirm)
+    events = []
+    for i, dets in enumerate(crash_frames()):
+        e = det.update(dets, i, now=i * dt, frame=frame)
+        if e:
+            events.append(e)
+    assert events, "a visually-confirmed crash must fire"
+    assert events[0].visual_score == 0.90, "the visual score should be recorded"
+    assert "visual" in events[0].summary, "the summary should mention the visual verdict"
+
+    # No verifier at all: the pure kinematic path still works as before.
+    det = AccidentDetector(verifier=None)
+    det.verifier = None
+    events = []
+    for i, dets in enumerate(crash_frames()):
+        e = det.update(dets, i, now=i * dt, frame=frame)
+        if e:
+            events.append(e)
+    assert events, "without a verifier the kinematic confirmation must still fire"
+    assert events[0].visual_score is None
+
+    return "veto on normal scene, confirm on wreck, clean fallback without it"
+
+
 def test_accident_cooldown() -> str:
     """One crash must produce one event, not one per chaotic frame."""
     from detector.detect import Detection
@@ -655,6 +726,7 @@ TESTS = [
     ("Accident kinematics (speed, TTC)", test_accident_kinematics),
     ("Accident detection (fusion)", test_accident_detection),
     ("Accident confirmation", test_accident_confirmation),
+    ("Accident visual verifier", test_accident_visual_verifier),
     ("Accident cooldown", test_accident_cooldown),
     ("Accident event logging", test_accident_logger),
     ("Target lock", test_target_lock),
