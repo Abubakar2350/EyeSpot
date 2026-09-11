@@ -1024,6 +1024,19 @@ def main() -> None:
                 "**max** is deliberately slow — roughly 7x the processing time. "
                 "Use it for reviewing recorded footage, not a live camera."
             )
+        if is_cloud():
+            # Worth saying out loud on a hosted deployment. The visual verifier
+            # is the single largest thing this app loads: measured at 1.7 GB
+            # peak alongside the detector, against Streamlit Community Cloud's
+            # 2.7 GB ceiling. It fits, but not with room to spare, and the
+            # weights are re-fetched after every restart because the filesystem
+            # is ephemeral.
+            st.sidebar.caption(
+                "On hosted free tiers the first accident check downloads the "
+                "visual model (~350 MB) and pushes memory to roughly 1.7 GB of "
+                "the 2.7 GB available. If the app reports going over its "
+                "resource limits, use a shorter clip or the **medium** preset."
+            )
 
     st.sidebar.caption(f"Device: `{detector.device}`  •  Classes: {len(detector.class_names)}")
 

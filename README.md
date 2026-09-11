@@ -226,6 +226,14 @@ datasets such as CCD or BDD100K. Fine-tuning would likely beat it and remains
 the Phase 3 path. If `open-clip-torch` is not installed the verifier simply
 stays off and confirmation falls back to pure kinematics.
 
+**Cost on hosted free tiers.** Measured peak resident memory with everything
+loaded — torch, YOLOv8s at 1280, and CLIP — is **1.7 GB**, against Streamlit
+Community Cloud's 2.7 GB ceiling. It fits, but without much room to spare. The
+weights are about 578 MB and the filesystem there is ephemeral, so they are
+re-downloaded after each restart, making the first accident check slow. The
+verifier is loaded lazily and only when a candidate needs checking, so anyone
+not using accident detection never pays any of this.
+
 ### Confirmation — the step that separates a crash from a near miss
 
 A candidate is **not announced immediately**. The vehicles involved are watched
