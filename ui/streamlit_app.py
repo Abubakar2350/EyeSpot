@@ -194,6 +194,25 @@ def apply_settings(detector: Detector, settings: dict, class_filter: list[str]) 
     )
 
 
+def make_accident_detector(enabled: bool, sensitivity: str) -> AccidentDetector | None:
+    """
+    Build an AccidentDetector for the chosen sensitivity, or None when the
+    feature is off.
+
+    Deliberately does nothing at all when disabled. An earlier version looked up
+    the sensitivity preset before checking the toggle, so a missing preset took
+    down the video tab for people who had never switched accident detection on.
+    Work belonging to an optional feature should stay behind its own switch.
+    """
+    if not enabled:
+        return None
+
+    threshold, persistence = config.ACCIDENT_SENSITIVITY.get(
+        sensitivity, config.ACCIDENT_SENSITIVITY["medium"]
+    )
+    return AccidentDetector(threshold=threshold, persistence=persistence)
+
+
 def show_counts(counts: dict[str, int], placeholder) -> None:
     if not counts:
         placeholder.info("No objects detected.")
@@ -401,8 +420,7 @@ def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = 
 
     writer: VideoWriter | None = None
     det_logger = DetectionLogger(prefix=f"{stem}_detections")
-    _th, _pers = config.ACCIDENT_SENSITIVITY[sensitivity]
-    accidents = AccidentDetector(threshold=_th, persistence=_pers) if accident_mode else None
+    accidents = make_accident_detector(accident_mode, sensitivity)
     accident_logger = AccidentLogger(prefix=f"{stem}_accidents") if accident_mode else None
 
     # Totals for the whole video, not just the last frame
@@ -662,8 +680,7 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
 
         # One detector instance for the whole stream, so track IDs and the
         # motion history behind accident detection survive between frames.
-        _th, _pers = config.ACCIDENT_SENSITIVITY[sensitivity]
-        accidents = AccidentDetector(threshold=_th, persistence=_pers) if accident_mode else None
+        accidents = make_accident_detector(accident_mode, sensitivity)
         counter = {"frame": 0}
 
         def video_frame_callback(frame):
@@ -852,8 +869,7 @@ def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False, se
     stats_slot = st.sidebar.empty()
     counts_slot = st.sidebar.empty()
     fps_counter = FPSCounter()
-    _th, _pers = config.ACCIDENT_SENSITIVITY[sensitivity]
-    accidents = AccidentDetector(threshold=_th, persistence=_pers) if accident_mode else None
+    accidents = make_accident_detector(accident_mode, sensitivity)
 
     try:
         # Unticking the checkbox re-runs the script, which ends this loop
