@@ -352,6 +352,8 @@ class AccidentDetector:
         self._last_score = 0.0
         self._last_signals: dict[str, float] = {}
         self._person_down_since: dict[int, float] = {}
+        # Speed of each track the last time it was seen, kept past pruning
+        self._last_speed: dict[int, float] = {}
         self._banner_until = 0.0
 
     # -- main entry point ---------------------------------------------------
@@ -450,10 +452,16 @@ class AccidentDetector:
         for track_id in self.pending.track_ids:
             state = self.tracks.get(track_id)
             if state is None:
-                # Gone from view during the window, so there is nothing to
-                # measure. Not counted either way: the pruning horizon is longer
-                # than the confirmation window, so a vehicle that is still in
-                # shot will still be here.
+                # Gone from view during the window. A wrecked car is often
+                # hidden behind the vehicle that hit it, behind a gathering
+                # crowd, or by the shot cutting away — so a disappearance is
+                # counted as coming to rest when the car was already slow the
+                # last time it was seen. A vehicle that was still moving when it
+                # left frame is not: that one drove off.
+                if config.ACCIDENT_CONFIRM_ON_VANISH:
+                    last = self._last_speed.get(track_id)
+                    if last is not None and last <= config.ACCIDENT_CONFIRM_MAX_SPEED * 2:
+                        stopped.append(track_id)
                 continue
             if state.speed() <= config.ACCIDENT_CONFIRM_MAX_SPEED:
                 stopped.append(track_id)
@@ -626,9 +634,14 @@ class AccidentDetector:
     # -- housekeeping -------------------------------------------------------
 
     def _prune(self, now: float, max_age: float = 3.0) -> None:
-        """Forget tracks that have not been seen for a while."""
+        """
+        Forget tracks that have not been seen for a while, keeping a note of how
+        fast each was going when it left — which is what lets a vanished vehicle
+        still count as having come to rest.
+        """
         stale = [tid for tid, s in self.tracks.items() if now - s.last_seen > max_age]
         for tid in stale:
+            self._last_speed[tid] = self.tracks[tid].speed()
             del self.tracks[tid]
             self._person_down_since.pop(tid, None)
 

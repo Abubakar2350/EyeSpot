@@ -396,10 +396,13 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
     accidents: AccidentDetector | None = None
     accident_logger: AccidentLogger | None = None
     if args.accident:
-        preset_threshold, preset_persistence = config.ACCIDENT_SENSITIVITY[args.accident_sensitivity]
+        preset = config.ACCIDENT_SENSITIVITY[args.accident_sensitivity]
         accidents = AccidentDetector(
-            threshold=args.accident_threshold if args.accident_threshold is not None else preset_threshold,
-            persistence=preset_persistence,
+            threshold=(
+                args.accident_threshold if args.accident_threshold is not None
+                else preset["threshold"]
+            ),
+            persistence=preset["persistence"],
         )
         accident_logger = AccidentLogger(directory=out_dir)
         saved_paths.append(accident_logger.path)
@@ -662,13 +665,23 @@ def main(argv: list[str] | None = None) -> int:
     # frames, and marginal detections break exactly that. So unless the user
     # picked a threshold themselves, --accident lowers it — measured on real
     # CCTV footage, 0.5 found nothing and 0.35 found every collision.
-    if args.conf is None:
-        args.conf = config.ACCIDENT_CONFIDENCE if args.accident else config.CONFIDENCE_THRESHOLD
-        if args.accident:
-            logger.info(
-                "Accident mode: confidence set to %.2f for stable tracking "
-                "(override with --conf)", args.conf,
-            )
+    if args.accident:
+        # Recall is limited by detection long before it is limited by scoring,
+        # so each sensitivity preset carries detection settings too. Anything
+        # the user set explicitly is left alone.
+        preset = config.ACCIDENT_SENSITIVITY[args.accident_sensitivity]
+        if args.conf is None:
+            args.conf = preset["confidence"]
+        if args.imgsz == config.IMAGE_SIZE:
+            args.imgsz = preset["imgsz"]
+        if preset["model"] and args.model == config.MODEL_NAME:
+            args.model = preset["model"]
+        logger.info(
+            "Accident mode (%s): model=%s imgsz=%d conf=%.2f",
+            args.accident_sensitivity, args.model, args.imgsz, args.conf,
+        )
+    elif args.conf is None:
+        args.conf = config.CONFIDENCE_THRESHOLD
 
     # --list-cameras is answered immediately, without loading the model
     if args.list_cameras:

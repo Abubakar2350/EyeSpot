@@ -169,11 +169,34 @@ ACCIDENT_PERSISTENCE_WINDOW = 8
 
 # Ready-made operating points, since the right one depends on the job: sifting
 # recorded footage tolerates false alarms far better than a live siren does.
+#
+# Each preset carries detection settings as well as scoring ones, because recall
+# is limited by detection long before it is limited by scoring. The clip this
+# was tuned against that no amount of threshold-lowering could reach is a
+# night-time junction with vehicles a few pixels across; raising the model size
+# and inference resolution roughly doubled the objects found there
+# (5.7 -> 11.0 per frame), which is the only thing that actually helps.
+#
+# "max" is deliberately slow. It exists for reviewing recorded footage where
+# missing an accident matters more than the wait, and it is the wrong choice for
+# a live camera.
 ACCIDENT_SENSITIVITY = {
-    # name:      (threshold, persistence)
-    "low":       (0.60, 3),   # quietest — only unambiguous events
-    "medium":    (0.50, 2),   # the measured default
-    "high":      (0.42, 2),   # catches more, expect roughly twice the false alarms
+    "low": {
+        "threshold": 0.60, "persistence": 3,
+        "confidence": 0.40, "imgsz": 640, "model": None,
+    },
+    "medium": {
+        "threshold": 0.50, "persistence": 2,
+        "confidence": 0.35, "imgsz": 640, "model": None,
+    },
+    "high": {
+        "threshold": 0.42, "persistence": 2,
+        "confidence": 0.30, "imgsz": 960, "model": None,
+    },
+    "max": {
+        "threshold": 0.36, "persistence": 1,
+        "confidence": 0.25, "imgsz": 1280, "model": "yolov8s.pt",
+    },
 }
 
 # Post-event confirmation.
@@ -189,6 +212,13 @@ ACCIDENT_CONFIRM_SECONDS = 2.5
 # A vehicle moving slower than this during the confirmation window counts as
 # stopped (object lengths per second).
 ACCIDENT_CONFIRM_MAX_SPEED = 0.4
+
+# Whether a vehicle that disappeared during the confirmation window counts as
+# stopped, provided it was already slow when last seen. A wrecked car is often
+# occluded by the vehicle that hit it, by a crowd, or by the shot cutting away —
+# insisting it stay visible throws those cases out. Costs some precision, so the
+# quieter presets leave it off.
+ACCIDENT_CONFIRM_ON_VANISH = True
 
 # Seconds to stay silent after an event. One crash produces many chaotic
 # frames; without this a single accident would raise dozens of events.

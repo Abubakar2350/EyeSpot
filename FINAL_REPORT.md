@@ -339,6 +339,39 @@ banner fades. Only vehicles that actually stopped are marked — a candidate
 sweeps in everything nearby, but the ones still sitting there are the ones that
 took part.
 
+### Closing the last gap
+
+Asked for a setting that misses nothing, the honest answer was that perfect
+recall is unattainable — but the specific gap was known and could be closed.
+
+The one clip no threshold could reach was a night-time junction with vehicles a
+few pixels across. Lowering the threshold never helped because the problem was
+never the threshold: the vehicles were barely being detected. Raising the model
+size and inference resolution roughly doubled the objects found there, from 5.7
+to 11.0 per frame.
+
+Sensitivity presets therefore now carry detection settings as well as scoring
+ones, and a `max` preset was added:
+
+| Preset | Accidents found (of 6) | False alarms | Speed |
+|---|---|---|---|
+| medium | 5 | +1 | 82 FPS |
+| **max** | **6** | +3 | 11 FPS |
+
+`max` found every accident in that footage, at roughly seven times the
+processing cost. That is the right trade for reviewing recordings and the wrong
+one for a live camera, so it is offered rather than made the default.
+
+Confirmation was also relaxed to accept a vehicle that vanished while already
+slow. A wrecked car is frequently hidden behind the vehicle that hit it, behind
+a gathering crowd, or by the shot cutting away, and insisting it stay visible
+discarded those cases.
+
+What cannot be promised: an accident outside the frame, fully occluded, or
+involving the camera vehicle itself is invisible to any of this. `max` is the
+setting that misses least on the footage it was measured against, not a
+guarantee about footage it has never seen.
+
 Reviewing saved snapshots by eye: real collisions are found, and the
 characteristic false positive is perspective. The characteristic false positive is perspective — on a dashcam, a
 nearby vehicle passing in front of distant pedestrians yields overlapping boxes

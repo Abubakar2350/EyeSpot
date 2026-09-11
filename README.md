@@ -266,7 +266,7 @@ Measured on real CCTV accident footage (640×360, 2298 frames, 76 seconds):
 Pass `--conf` yourself to override it. In the web UI the same adjustment is made
 when the toggle is switched on, and it says so in the sidebar.
 
-### Sensitivity
+### Sensitivity — including a mode that misses nothing
 
 The right operating point depends on the job: sifting recorded footage tolerates
 false alarms far better than a live alert does.
@@ -275,7 +275,42 @@ false alarms far better than a live alert does.
 python main.py --source clip.mp4 --accident --accident-sensitivity low      # only unambiguous events
 python main.py --source clip.mp4 --accident --accident-sensitivity medium   # default
 python main.py --source clip.mp4 --accident --accident-sensitivity high     # catches more, more noise
+python main.py --source clip.mp4 --accident --accident-sensitivity max      # miss nothing, much slower
 ```
+
+Each preset carries **detection** settings as well as scoring ones, because
+recall is limited by detection long before it is limited by scoring:
+
+| Preset | Threshold | Persistence | Confidence | Image size | Model |
+|---|---|---|---|---|---|
+| low | 0.60 | 3 of 8 | 0.40 | 640 | default |
+| medium | 0.50 | 2 of 8 | 0.35 | 640 | default |
+| high | 0.42 | 2 of 8 | 0.30 | 960 | default |
+| **max** | **0.36** | **1 of 8** | **0.25** | **1280** | **yolov8s** |
+
+Measured on the CCTV compilation (six accident clips in 76 seconds):
+
+| Preset | Accidents found | False alarms | Speed |
+|---|---|---|---|
+| medium | 5 of 6 | +1 | 82 FPS (28 s) |
+| **max** | **6 of 6** | +3 | 11 FPS (214 s) |
+
+**`max` found every accident in that footage**, including the night-time
+junction that no amount of threshold-lowering could reach — because the fix
+there was never the threshold. Those vehicles are a few pixels across, and
+raising the model size and inference resolution roughly doubled the objects
+detected (5.7 to 11.0 per frame), which is what finally gave the kinematics
+something to read.
+
+It costs about 7x the processing time and three false alarms instead of one.
+That is the right trade when reviewing recorded footage, where a missed accident
+matters far more than a wasted glance; it is the wrong trade for a live camera,
+where 11 FPS is not real time.
+
+**A caveat worth stating plainly:** "found every accident" means *in this
+footage*. No vision system can promise perfect recall — an accident outside the
+frame, fully occluded, or involving the camera vehicle itself cannot be seen at
+all. `max` is the setting that misses least, not a guarantee.
 
 The web UI has the same control as a slider. Every threshold and weight lives in
 the accident section of `config.py`, and `--accident-threshold` overrides the
@@ -290,16 +325,16 @@ into **six distinguishable accident clips**, which serve as rough ground truth:
 |---|---|---|
 | Before confirmation, threshold 0.55 | 3 of 6 | +2 |
 | Before confirmation, threshold 0.50 | 5 of 6 | +3 |
-| **With confirmation, threshold 0.50** | **5 of 6** | **+1** |
+| With confirmation, threshold 0.50 (medium) | 5 of 6 | +1 |
+| **With confirmation, `max` preset** | **6 of 6** | **+3** |
 
-Confirmation is what made the difference: the same accidents found, with a third
-of the false alarms.
+Confirmation cut the false alarms to a third without losing an accident; the
+`max` preset then closed the last gap by fixing detection rather than scoring.
 
-**The one clip never caught at any setting** is a night-time junction filmed
-wide, where the vehicles are a few pixels across. Neither detection nor tracking
-is reliable at that scale, so there is nothing for the kinematics to read. That
-is a detection problem, not a scoring one — the slicing approach in
-[NEXT_PHASES.md](NEXT_PHASES.md) is what would address it.
+The clip that no threshold could reach — a night-time junction filmed wide, with
+vehicles a few pixels across — is now caught by the `max` preset, which raises
+the model and inference resolution instead of lowering the bar. That confirmed
+the diagnosis: it was a detection problem, not a scoring one.
 
 The characteristic false positive is **perspective**: on a dashcam, a nearby
 vehicle passing in front of distant pedestrians produces overlapping boxes that

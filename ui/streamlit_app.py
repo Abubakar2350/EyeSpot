@@ -207,10 +207,12 @@ def make_accident_detector(enabled: bool, sensitivity: str) -> AccidentDetector 
     if not enabled:
         return None
 
-    threshold, persistence = config.ACCIDENT_SENSITIVITY.get(
+    preset = config.ACCIDENT_SENSITIVITY.get(
         sensitivity, config.ACCIDENT_SENSITIVITY["medium"]
     )
-    return AccidentDetector(threshold=threshold, persistence=persistence)
+    return AccidentDetector(
+        threshold=preset["threshold"], persistence=preset["persistence"]
+    )
 
 
 def show_counts(counts: dict[str, int], placeholder) -> None:
@@ -940,12 +942,14 @@ def main() -> None:
     if accident_mode:
         accident_sensitivity = st.sidebar.select_slider(
             "Accident sensitivity",
-            options=["low", "medium", "high"],
+            options=["low", "medium", "high", "max"],
             value="medium",
             help=(
                 "low: only unambiguous events. high: catches more, with roughly "
-                "twice the false alarms. Sifting recorded footage tolerates false "
-                "alarms far better than a live alert does."
+                "twice the false alarms. max: also raises the model size and "
+                "inference resolution to find small distant vehicles — much "
+                "slower, meant for reviewing recorded footage rather than a "
+                "live camera."
             ),
         )
         tracking = True
@@ -953,17 +957,22 @@ def main() -> None:
         # hold the same track ID. Marginal detections flicker and break that, so
         # the confidence threshold is lowered here unless the user has already
         # moved it below the recommended ceiling themselves.
-        if settings["confidence"] > config.ACCIDENT_CONFIDENCE:
-            settings["confidence"] = config.ACCIDENT_CONFIDENCE
-            apply_settings(detector, settings, class_filter)
-            st.sidebar.info(
-                f"Confidence lowered to **{config.ACCIDENT_CONFIDENCE}** and tracking "
-                "enabled — accident detection needs objects to keep the same ID "
-                "between frames, and detections near the usual 0.5 threshold "
-                "flicker in and out, resetting their motion history."
+        preset = config.ACCIDENT_SENSITIVITY[accident_sensitivity]
+        settings["confidence"] = min(settings["confidence"], preset["confidence"])
+        settings["imgsz"] = max(settings["imgsz"], preset["imgsz"])
+        apply_settings(detector, settings, class_filter)
+        st.sidebar.info(
+            f"Tracking on, confidence **{settings['confidence']:.2f}**, image size "
+            f"**{settings['imgsz']}**. Accident detection reads motion between "
+            "frames, so objects must keep the same ID — detections near the usual "
+            "0.5 threshold flicker in and out and reset their history."
+        )
+        if preset["model"]:
+            st.sidebar.warning(
+                f"**max** also wants `{preset['model']}` at image size {preset['imgsz']}. "
+                "Pick that model above for the full effect — it is considerably "
+                "slower, and meant for reviewing footage rather than a live camera."
             )
-        else:
-            st.sidebar.caption("Tracking enabled automatically — accident detection needs persistent IDs.")
 
     st.sidebar.caption(f"Device: `{detector.device}`  •  Classes: {len(detector.class_names)}")
 
