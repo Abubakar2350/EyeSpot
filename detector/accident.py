@@ -151,6 +151,31 @@ class TrackState:
         vx, vy = self.velocity(window)
         return math.hypot(vx, vy) / max(self.scale, 1.0)
 
+    def speed_before(self, ago: float = 0.4, window: float = 0.3) -> float:
+        """
+        Speed over a window that *ended* `ago` seconds back, in object lengths
+        per second.
+
+        Distinct from `speed(window)`, which averages everything up to now and
+        therefore includes whatever just happened. Asking "was it moving before
+        this?" requires a window that excludes the present — otherwise a car
+        that has just slammed to a halt reports a low earlier speed too, and the
+        collapse becomes invisible.
+        """
+        if len(self.samples) < 4:
+            return 0.0
+
+        now = self.samples[-1][0]
+        segment = [s for s in self.samples if ago <= now - s[0] <= ago + window]
+        if len(segment) < 2:
+            return 0.0
+
+        dt = segment[-1][0] - segment[0][0]
+        if dt <= 0:
+            return 0.0
+        dist = math.hypot(segment[-1][1] - segment[0][1], segment[-1][2] - segment[0][2])
+        return dist / dt / max(self.scale, 1.0)
+
     def acceleration(self, window: float = 0.25) -> float:
         """
         Change in speed per second, in object lengths. Negative means slowing.
@@ -464,12 +489,23 @@ class AccidentDetector:
         return signals, involved_dets
 
     def _is_sudden_stop(self, state: TrackState) -> bool:
-        """Was this object moving a moment ago and is now effectively still?"""
+        """
+        Was this object moving a moment ago and is it effectively still now?
+
+        The two windows must not overlap. An earlier version compared the last
+        0.2 s against the last 0.6 s, but the longer window contained the stop
+        itself, so the "before" speed was already dragged down and the collapse
+        never looked like one. Measured on real CCTV footage this channel fired
+        on one clip out of eight; with disjoint windows it fires where it should.
+        """
         if len(state.samples) < 6:
             return False
         recent = state.speed(window=0.2)
-        earlier = state.speed(window=0.6)
-        return earlier > config.ACCIDENT_MOVING_SPEED and recent < earlier * 0.15
+        earlier = state.speed_before(ago=0.35, window=0.3)
+        return (
+            earlier > config.ACCIDENT_MOVING_SPEED
+            and recent < earlier * config.ACCIDENT_STOP_RATIO
+        )
 
     def _person_down_score(self, state: TrackState, now: float) -> float:
         """

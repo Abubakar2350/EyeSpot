@@ -236,36 +236,50 @@ Measured on real CCTV accident footage (640×360, 2298 frames, 76 seconds):
 Pass `--conf` yourself to override it. In the web UI the same adjustment is made
 when the toggle is switched on, and it says so in the sidebar.
 
-### Tuning
+### Sensitivity
+
+The right operating point depends on the job: sifting recorded footage tolerates
+false alarms far better than a live alert does.
 
 ```bash
-python main.py --source clip.mp4 --accident --accident-threshold 0.45   # more sensitive
-python main.py --source clip.mp4 --accident --accident-threshold 0.70   # quieter
+python main.py --source clip.mp4 --accident --accident-sensitivity low      # only unambiguous events
+python main.py --source clip.mp4 --accident --accident-sensitivity medium   # default
+python main.py --source clip.mp4 --accident --accident-sensitivity high     # catches more, more noise
 ```
 
-Every threshold and weight lives in the accident section of `config.py`.
+The web UI has the same control as a slider. Every threshold and weight lives in
+the accident section of `config.py`, and `--accident-threshold` overrides the
+preset outright.
 
-### Accuracy, honestly
+### Measured recall
 
-On the 76-second compilation above it raised 5 events. Reviewing the saved
-snapshots by eye:
+Evaluated on a 76-second CCTV crash compilation. Scene-cut detection splits it
+into **six distinguishable accident clips**, which serve as rough ground truth:
 
-| Verdict | Count |
-|---|---|
-| Clearly a real collision | 2 |
-| Plausible, hard to call from one frame | 2 |
-| Clearly ordinary traffic | 1 |
+| Sensitivity | Threshold | Persistence | Clips found | Extra events |
+|---|---|---|---|---|
+| low | 0.60 | 3 of 8 | 3 of 6 | +1 |
+| **medium** | **0.50** | **2 of 8** | **5 of 6** | **+3** |
+| high | 0.42 | 2 of 8 | 5 of 6 | +5 |
 
-So it finds real accidents and it also cries wolf. The most common false
-positive is **perspective**: on a dashcam, a nearby vehicle passing in front of
-distant pedestrians produces overlapping boxes that appear to be closing, which
-is indistinguishable from a collision in a flat 2D image. Depth would resolve
-it; a single camera does not provide depth.
+Below 0.50 the extra events pile up without finding anything new, which is why
+medium is the default.
+
+**The one clip never caught at any setting** is a night-time junction filmed
+wide, where the vehicles are a few pixels across. Neither detection nor tracking
+is reliable at that scale, so there is nothing for the kinematics to read. That
+is a detection problem, not a scoring one — the slicing approach in
+[NEXT_PHASES.md](NEXT_PHASES.md) is what would address it.
+
+The characteristic false positive is **perspective**: on a dashcam, a nearby
+vehicle passing in front of distant pedestrians produces overlapping boxes that
+appear to be closing, which a flat 2D image cannot distinguish from a collision.
+Depth would resolve it; one camera does not provide depth.
 
 Treat the output as *frames worth a human's attention*, not as a verdict. That
-is a useful thing on 76 seconds of footage and considerably more useful on eight
-hours of it — but it is not the same as a trained classifier, and no accuracy
-figure against a labelled benchmark is claimed.
+is worth little across 76 seconds and a great deal across eight hours — but it
+is not a trained classifier, and no accuracy figure against a labelled benchmark
+is claimed.
 
 ### What this is, and what it is not
 

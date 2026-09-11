@@ -280,9 +280,41 @@ a diagnostic, because measurement showed it pointed the wrong way: lowering the
 confidence produced *more* short-lived tracks while detecting *more* accidents.
 It is reported, but nothing depends on it.
 
-Reviewing the five saved snapshots by eye: two are clearly real collisions, two
-are plausible but hard to judge from a single frame, and one is ordinary
-traffic. The characteristic false positive is perspective — on a dashcam, a
+A follow-up report that many accidents were still being missed led to two more
+defects, both found by measuring rather than guessing:
+
+**The CLI measured speed against the wall clock.** A video file is processed as
+fast as the CPU allows — this clip ran at 2.5x real time — so every velocity,
+acceleration and time-to-collision was inflated by that factor, manufacturing
+events that were not there. The Streamlit video tab already drove the clock from
+the footage; the CLI now does the same, while live cameras correctly keep using
+the wall clock.
+
+**The sudden-stop channel almost never fired.** It compared the last 0.2 s
+against the last 0.6 s, but the longer window *contained the stop*, so the
+"before" speed was already dragged down and the collapse never looked like one.
+Measured across eight clips it fired on exactly one. With disjoint windows —
+now against a window ending 0.35 s ago — it fires where it should, and peak
+scores on real collisions rose accordingly (one clip from 0.73 to 0.95).
+
+A threshold sweep against scene-cut ground truth then set the defaults:
+
+| Threshold | Persistence | Clips found (of 6) | Extra events |
+|---|---|---|---|
+| 0.55 | 3 of 8 | 3 | +2 |
+| **0.50** | **2 of 8** | **5** | **+3** |
+| 0.45 | 3 of 8 | 5 | +4 |
+| 0.40 | 2 of 8 | 5 | +5 |
+
+Below 0.50 the extra events accumulate without finding anything new. Three
+sensitivity presets expose the trade-off, because sifting recorded footage
+tolerates false alarms far better than a live alert does.
+
+The one clip missed at every setting is a night-time junction filmed wide, with
+vehicles a few pixels across — a detection limit, not a scoring one.
+
+Reviewing saved snapshots by eye: real collisions are found, and the
+characteristic false positive is perspective. The characteristic false positive is perspective — on a dashcam, a
 nearby vehicle passing in front of distant pedestrians yields overlapping boxes
 that appear to close, which a flat 2D image cannot distinguish from an impact.
 

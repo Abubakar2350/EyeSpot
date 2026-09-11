@@ -350,7 +350,7 @@ def show_video_result(result: dict) -> None:
     st.caption(f"These files are also saved in: `{video_path.parent}`")
 
 
-def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = False) -> None:
+def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = False, sensitivity: str = "medium") -> None:
     uploaded = st.file_uploader("Upload a video", type=["mp4", "avi", "mov", "mkv"])
     if uploaded is None:
         st.info("Upload a video file (.mp4 / .avi).")
@@ -401,7 +401,8 @@ def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = 
 
     writer: VideoWriter | None = None
     det_logger = DetectionLogger(prefix=f"{stem}_detections")
-    accidents = AccidentDetector() if accident_mode else None
+    _th, _pers = config.ACCIDENT_SENSITIVITY[sensitivity]
+    accidents = AccidentDetector(threshold=_th, persistence=_pers) if accident_mode else None
     accident_logger = AccidentLogger(prefix=f"{stem}_accidents") if accident_mode else None
 
     # Totals for the whole video, not just the last frame
@@ -615,7 +616,7 @@ def save_camera_form(url: str, default_kind: str) -> None:
             st.success(f"Saved: **{profile.name}** → `{profile.safe_url}`  •  CLI: `python main.py --camera {profile.name}`")
 
 
-def device_camera_section(detector: Detector, tracking: bool = False, accident_mode: bool = False) -> None:
+def device_camera_section(detector: Detector, tracking: bool = False, accident_mode: bool = False, sensitivity: str = "medium") -> None:
     """
     Detection on the camera of the device *viewing* the page — a phone's camera,
     a tablet's, a laptop's webcam.
@@ -661,7 +662,8 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
 
         # One detector instance for the whole stream, so track IDs and the
         # motion history behind accident detection survive between frames.
-        accidents = AccidentDetector() if accident_mode else None
+        _th, _pers = config.ACCIDENT_SENSITIVITY[sensitivity]
+        accidents = AccidentDetector(threshold=_th, persistence=_pers) if accident_mode else None
         counter = {"frame": 0}
 
         def video_frame_callback(frame):
@@ -749,7 +751,7 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
         )
 
 
-def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False) -> None:
+def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False, sensitivity: str = "medium") -> None:
     """A saved camera, the local webcam, or a network camera (phone / CCTV / IP)."""
     try:
         saved = load_cameras()
@@ -777,7 +779,7 @@ def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False) ->
     source_type = st.radio("Camera type", choices, horizontal=True)
 
     if source_type == "This device's camera":
-        device_camera_section(detector, tracking, accident_mode)
+        device_camera_section(detector, tracking, accident_mode, sensitivity)
         return
 
     if source_type == "Saved camera":
@@ -850,7 +852,8 @@ def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False) ->
     stats_slot = st.sidebar.empty()
     counts_slot = st.sidebar.empty()
     fps_counter = FPSCounter()
-    accidents = AccidentDetector() if accident_mode else None
+    _th, _pers = config.ACCIDENT_SENSITIVITY[sensitivity]
+    accidents = AccidentDetector(threshold=_th, persistence=_pers) if accident_mode else None
 
     try:
         # Unticking the checkbox re-runs the script, which ends this loop
@@ -917,7 +920,18 @@ def main() -> None:
             "motion stops looking like traffic. Needs tracking, so it turns it on."
         ),
     )
+    accident_sensitivity = "medium"
     if accident_mode:
+        accident_sensitivity = st.sidebar.select_slider(
+            "Accident sensitivity",
+            options=["low", "medium", "high"],
+            value="medium",
+            help=(
+                "low: only unambiguous events. high: catches more, with roughly "
+                "twice the false alarms. Sifting recorded footage tolerates false "
+                "alarms far better than a live alert does."
+            ),
+        )
         tracking = True
         # Accident detection reads motion between frames, which needs objects to
         # hold the same track ID. Marginal detections flicker and break that, so
@@ -941,9 +955,9 @@ def main() -> None:
     with image_tab:
         tab_image(detector)
     with video_tab:
-        tab_video(detector, tracking, accident_mode)
+        tab_video(detector, tracking, accident_mode, accident_sensitivity)
     with live_tab:
-        tab_live(detector, tracking, accident_mode)
+        tab_live(detector, tracking, accident_mode, accident_sensitivity)
 
 
 if __name__ == "__main__":

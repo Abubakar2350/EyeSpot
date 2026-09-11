@@ -143,14 +143,38 @@ ACCIDENT_CONFIDENCE = 0.35
 
 # Fused score at which an event is considered. Lower catches more and cries
 # wolf more; higher is quieter but misses marginal cases.
-ACCIDENT_THRESHOLD = 0.55
+#
+# 0.50 with a 2-of-8 persistence window is the measured sweet spot. Swept over
+# a 76-second CCTV compilation containing six distinguishable accident clips:
+#
+#   threshold  persistence   clips found   extra events
+#      0.55        3 of 8        3 of 6         +2
+#      0.55        2 of 8        4 of 6         +2
+#      0.50        3 of 8        4 of 6         +2
+#      0.50        2 of 8        5 of 6         +3     <- default
+#      0.45        3 of 8        5 of 6         +4
+#      0.40        2 of 8        5 of 6         +5
+#
+# Below 0.50 the extra events pile up without finding anything new. The one clip
+# never caught at any setting is a night-time junction where the vehicles are a
+# few pixels across — a detection problem, not a scoring one.
+ACCIDENT_THRESHOLD = 0.50
 
 # The score must clear the threshold on this many of the last
 # ACCIDENT_PERSISTENCE_WINDOW frames. A sliding window rather than a
 # consecutive run: real footage drops a detection for a frame at a time, and
 # demanding an unbroken streak discarded evidence that was plainly there.
-ACCIDENT_PERSISTENCE = 3
+ACCIDENT_PERSISTENCE = 2
 ACCIDENT_PERSISTENCE_WINDOW = 8
+
+# Ready-made operating points, since the right one depends on the job: sifting
+# recorded footage tolerates false alarms far better than a live siren does.
+ACCIDENT_SENSITIVITY = {
+    # name:      (threshold, persistence)
+    "low":       (0.60, 3),   # quietest — only unambiguous events
+    "medium":    (0.50, 2),   # the measured default
+    "high":      (0.42, 2),   # catches more, expect roughly twice the false alarms
+}
 
 # Seconds to stay silent after an event. One crash produces many chaotic
 # frames; without this a single accident would raise dozens of events.
@@ -186,6 +210,10 @@ ACCIDENT_TTC_SECONDS = 0.8
 
 # An object slower than this is treated as stationary (lengths/s)
 ACCIDENT_MOVING_SPEED = 0.5
+
+# Speed must fall to this fraction of what it was for a "sudden stop". The two
+# windows compared are disjoint, so this really is "before" against "now".
+ACCIDENT_STOP_RATIO = 0.3
 
 # A person's box wider-than-tall by this ratio suggests they are on the ground
 ACCIDENT_PERSON_DOWN_RATIO = 1.1

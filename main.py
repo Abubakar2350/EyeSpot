@@ -157,8 +157,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Detect road accidents from motion (implies --track, since it needs persistent IDs)",
     )
     parser.add_argument(
+        "--accident-sensitivity", choices=sorted(config.ACCIDENT_SENSITIVITY), default="medium",
+        help="low = only unambiguous events, high = catches more with more false alarms (default: medium)",
+    )
+    parser.add_argument(
         "--accident-threshold", type=float, default=None, metavar="SCORE",
-        help=f"Fused score that triggers an event (default: {config.ACCIDENT_THRESHOLD})",
+        help=f"Override the sensitivity preset's score (default: {config.ACCIDENT_THRESHOLD})",
     )
 
     parser.add_argument("--save", action="store_true", help="Save the annotated video/image")
@@ -392,7 +396,11 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
     accidents: AccidentDetector | None = None
     accident_logger: AccidentLogger | None = None
     if args.accident:
-        accidents = AccidentDetector(threshold=args.accident_threshold)
+        preset_threshold, preset_persistence = config.ACCIDENT_SENSITIVITY[args.accident_sensitivity]
+        accidents = AccidentDetector(
+            threshold=args.accident_threshold if args.accident_threshold is not None else preset_threshold,
+            persistence=preset_persistence,
+        )
         accident_logger = AccidentLogger(directory=out_dir)
         saved_paths.append(accident_logger.path)
 
@@ -414,7 +422,11 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
     if tracking:
         print(f"Tracking: ON ({detector.tracker})")
     if accidents is not None:
-        print(f"Accident detection: ON (threshold {accidents.threshold:.2f})")
+        print(
+            f"Accident detection: ON  sensitivity={args.accident_sensitivity} "
+            f"(threshold {accidents.threshold:.2f}, {accidents.persistence}/"
+            f"{config.ACCIDENT_PERSISTENCE_WINDOW} frames)"
+        )
     if args.lock:
         print(f"Auto-lock: first '{args.lock}'")
     if args.lock_id is not None:
@@ -485,7 +497,19 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                 target_lock.draw(frame, target)
 
                 if accidents is not None:
-                    event = accidents.update(detections, fps_counter.frame_count)
+                    # Drive the clock from the footage, not the wall clock. A
+                    # video file is processed as fast as the CPU allows — this
+                    # clip ran at 2.5x real time — and measuring speeds against
+                    # elapsed processing time inflates every velocity by that
+                    # factor, manufacturing accidents that are not there. A live
+                    # camera is different: there the wall clock *is* the
+                    # footage's clock.
+                    stamp = (
+                        fps_counter.frame_count / src_fps
+                        if kind == "video" and src_fps and src_fps > 0
+                        else None
+                    )
+                    event = accidents.update(detections, fps_counter.frame_count, now=stamp)
                     if event is not None:
                         # Snapshot the annotated frame before the banner is drawn
                         # over it, so the saved image shows the scene clearly.
@@ -496,7 +520,7 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                         )
                         if snapshot:
                             print(f"    snapshot: {snapshot}")
-                    accidents.draw(frame)
+                    accidents.draw(frame, now=stamp)
 
                 if det_logger is not None:
                     det_logger.log(fps_counter.frame_count, detections)
