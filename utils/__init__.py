@@ -10,7 +10,13 @@ from .cameras import (
 )
 from .fps_counter import FPSCounter
 from .overlay import draw_overlay
-from .save_output import DetectionLogger, VideoWriter, save_screenshot
+from .save_output import (
+    AccidentLogger,
+    DetectionLogger,
+    VideoWriter,
+    save_screenshot,
+    transcode_for_browser,
+)
 
 __all__ = [
     "CameraProfile",
@@ -21,7 +27,9 @@ __all__ = [
     "save_camera",
     "FPSCounter",
     "draw_overlay",
+    "AccidentLogger",
     "DetectionLogger",
     "VideoWriter",
     "save_screenshot",
+    "transcode_for_browser",
 ]
