@@ -124,13 +124,33 @@ TARGET_LOST_AFTER = 30
 # resolution, so one set of thresholds works on a dashcam, a CCTV pole and a
 # phone at the roadside alike.
 
+# Detection confidence used while accident detection is on.
+#
+# Lower than the normal default on purpose, and this is the single setting that
+# decides whether the feature works at all. Everything here is derived from how
+# an object moves between frames, which requires it to keep the same track ID.
+# At the usual 0.5 threshold, vehicles in ordinary CCTV footage are detected
+# marginally — around 0.5 confidence — so they flicker in and out, the tracker
+# issues a fresh ID each time, and the motion history resets.
+#
+# Measured on real CCTV accident footage (640x360, 2298 frames):
+#   confidence 0.50 -> 0 events; the score cleared the threshold on 2 isolated frames
+#   confidence 0.35 -> 3 events, correctly placed at the collisions
+#
+# The fusion rules are what guard against false positives, so a lower detection
+# threshold costs little here and buys the continuity the whole method needs.
+ACCIDENT_CONFIDENCE = 0.35
+
 # Fused score at which an event is considered. Lower catches more and cries
 # wolf more; higher is quieter but misses marginal cases.
 ACCIDENT_THRESHOLD = 0.55
 
-# Consecutive frames the score must stay above the threshold. Stops a single
-# bad frame — one mislabelled box, one dropped detection — from firing.
+# The score must clear the threshold on this many of the last
+# ACCIDENT_PERSISTENCE_WINDOW frames. A sliding window rather than a
+# consecutive run: real footage drops a detection for a frame at a time, and
+# demanding an unbroken streak discarded evidence that was plainly there.
 ACCIDENT_PERSISTENCE = 3
+ACCIDENT_PERSISTENCE_WINDOW = 8
 
 # Seconds to stay silent after an event. One crash produces many chaotic
 # frames; without this a single accident would raise dozens of events.

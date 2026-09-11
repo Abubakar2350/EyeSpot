@@ -919,7 +919,21 @@ def main() -> None:
     )
     if accident_mode:
         tracking = True
-        st.sidebar.caption("Tracking enabled automatically — accident detection needs persistent IDs.")
+        # Accident detection reads motion between frames, which needs objects to
+        # hold the same track ID. Marginal detections flicker and break that, so
+        # the confidence threshold is lowered here unless the user has already
+        # moved it below the recommended ceiling themselves.
+        if settings["confidence"] > config.ACCIDENT_CONFIDENCE:
+            settings["confidence"] = config.ACCIDENT_CONFIDENCE
+            apply_settings(detector, settings, class_filter)
+            st.sidebar.info(
+                f"Confidence lowered to **{config.ACCIDENT_CONFIDENCE}** and tracking "
+                "enabled — accident detection needs objects to keep the same ID "
+                "between frames, and detections near the usual 0.5 threshold "
+                "flicker in and out, resetting their motion history."
+            )
+        else:
+            st.sidebar.caption("Tracking enabled automatically — accident detection needs persistent IDs.")
 
     st.sidebar.caption(f"Device: `{detector.device}`  •  Classes: {len(detector.class_names)}")
 

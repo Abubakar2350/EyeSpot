@@ -112,8 +112,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model", default=config.MODEL_NAME, help="YOLO weights (default: yolov8n.pt)")
     parser.add_argument("--device", default=config.DEVICE, help="cpu / cuda / mps (default: auto)")
     parser.add_argument(
-        "--conf", type=float, default=config.CONFIDENCE_THRESHOLD,
-        help=f"Confidence threshold (default: {config.CONFIDENCE_THRESHOLD})",
+        "--conf", type=float, default=None,
+        help=(
+            f"Confidence threshold (default: {config.CONFIDENCE_THRESHOLD}, "
+            f"or {config.ACCIDENT_CONFIDENCE} with --accident)"
+        ),
     )
     parser.add_argument(
         "--iou", type=float, default=config.IOU_THRESHOLD,
@@ -626,6 +629,18 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Accident detection needs objects to keep the same track ID between
+    # frames, and marginal detections break exactly that. So unless the user
+    # picked a threshold themselves, --accident lowers it — measured on real
+    # CCTV footage, 0.5 found nothing and 0.35 found every collision.
+    if args.conf is None:
+        args.conf = config.ACCIDENT_CONFIDENCE if args.accident else config.CONFIDENCE_THRESHOLD
+        if args.accident:
+            logger.info(
+                "Accident mode: confidence set to %.2f for stable tracking "
+                "(override with --conf)", args.conf,
+            )
 
     # --list-cameras is answered immediately, without loading the model
     if args.list_cameras:

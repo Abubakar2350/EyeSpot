@@ -254,6 +254,42 @@ the cooldown's whole length — precisely where a dashcam accident usually sits.
 Initialising to negative infinity fixed it, and a test now asserts the first
 event arrives within four seconds.
 
+### Measured on real footage
+
+Tested against a 76-second CCTV accident compilation (640×360, 2298 frames)
+after an initial report that the feature detected nothing:
+
+| Detection confidence | Events |
+|---|---|
+| 0.50 (the app's default) | **0** |
+| 0.35 | 5 |
+
+The cause was not the scoring. At 0.50 the fused score peaked at 0.714, well
+above the 0.55 threshold — but on only **2 isolated frames out of 2298**.
+Vehicles in that footage are detected at around 0.5 confidence, so they flicker
+in and out, the tracker issues a new ID on each reappearance, and the motion
+history resets precisely when the collision makes them hardest to see.
+
+Two changes followed. Persistence became a sliding window (3 of the last 8
+frames) rather than a consecutive run, since demanding an unbroken streak
+discards evidence that is plainly present. And `--accident` now lowers the
+detection confidence to 0.35 by default, which is what actually fixed it.
+
+A track-stability metric was also built as a warning signal and then demoted to
+a diagnostic, because measurement showed it pointed the wrong way: lowering the
+confidence produced *more* short-lived tracks while detecting *more* accidents.
+It is reported, but nothing depends on it.
+
+Reviewing the five saved snapshots by eye: two are clearly real collisions, two
+are plausible but hard to judge from a single frame, and one is ordinary
+traffic. The characteristic false positive is perspective — on a dashcam, a
+nearby vehicle passing in front of distant pedestrians yields overlapping boxes
+that appear to close, which a flat 2D image cannot distinguish from an impact.
+
+The honest framing is that this surfaces *frames worth a human's attention*,
+which is worth a great deal across eight hours of footage and is not the same
+thing as a verdict.
+
 ### What it is not
 
 This is a kinematic anomaly detector. It does **not** include a trained accident

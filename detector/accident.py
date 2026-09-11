@@ -278,6 +278,16 @@ class AccidentDetector:
         self.tracks: dict[int, TrackState] = {}
         self.events: list[AccidentEvent] = []
 
+        # Recent above-threshold history, for the sliding-window persistence
+        # check. A strictly consecutive run proved too brittle: marginal
+        # detections drop out for a frame at a time, and demanding an unbroken
+        # streak discards evidence that is plainly present.
+        self._recent_hits: deque = deque(maxlen=config.ACCIDENT_PERSISTENCE_WINDOW)
+        # Track identity churn, used to warn when tracking is too unstable for
+        # any of this to work
+        self._seen_ids: set[int] = set()
+        self._id_frames: dict[int, int] = {}
+        self._frames_seen = 0
         self._above_threshold = 0
         # Negative infinity, not zero: the clock starts near zero on a fresh
         # clip, so a zero here would silence the cooldown's whole length at the
@@ -314,7 +324,10 @@ class AccidentDetector:
             d for d in detections
             if d.track_id is not None and d.label in ROAD_USER_CLASSES
         ]
+        self._frames_seen += 1
         for det in road_users:
+            self._seen_ids.add(det.track_id)
+            self._id_frames[det.track_id] = self._id_frames.get(det.track_id, 0) + 1
             state = self.tracks.get(det.track_id)
             if state is None:
                 state = TrackState(track_id=det.track_id, label=det.label)
@@ -328,12 +341,15 @@ class AccidentDetector:
         self._last_score = score
         self._last_signals = signals
 
-        # Persistence: a score has to hold for several frames. A single frame of
-        # nonsense — one bad box, one missed detection — should never fire.
-        if score >= self.threshold:
-            self._above_threshold += 1
-        else:
-            self._above_threshold = 0
+        # Persistence, as a sliding window rather than a consecutive run: the
+        # score must clear the threshold on `persistence` of the last
+        # `ACCIDENT_PERSISTENCE_WINDOW` frames. A single frame of nonsense still
+        # cannot fire, but one dropped detection in the middle of a genuine
+        # crash no longer resets the count to zero — which is exactly what a
+        # consecutive run did on real CCTV footage, where marginal detections
+        # flicker precisely when the collision makes them hard to see.
+        self._recent_hits.append(score >= self.threshold)
+        self._above_threshold = sum(self._recent_hits)
 
         if self._above_threshold < self.persistence:
             return None
@@ -345,6 +361,7 @@ class AccidentDetector:
 
         event = self._build_event(frame_index, score, signals, involved)
         self._last_event_time = now
+        self._recent_hits.clear()
         self._above_threshold = 0
         self._banner_until = now + 3.0
         self.events.append(event)
@@ -519,6 +536,30 @@ class AccidentDetector:
     @property
     def signals(self) -> dict[str, float]:
         return dict(self._last_signals)
+
+    @property
+    def track_stability(self) -> float:
+        """
+        The share of tracked objects that lived long enough to have measurable
+        kinematics — at least four samples, which is what acceleration needs.
+
+        Reported for diagnostics rather than as a warning. It is deliberately
+        *not* used to decide whether something is wrong: measured on real
+        footage, lowering the detection confidence produced more short-lived
+        tracks (so a lower figure here) while detecting strictly more
+        accidents. A raw lifetime ratio is therefore a poor predictor of
+        whether the feature is working, and the detection confidence is the
+        setting that actually matters — see config.ACCIDENT_CONFIDENCE.
+        """
+        if not self._id_frames:
+            return 1.0
+        usable = sum(1 for frames in self._id_frames.values() if frames >= 4)
+        return usable / len(self._id_frames)
+
+    @property
+    def usable_tracks(self) -> int:
+        """How many tracks ever accumulated enough history to be measured."""
+        return sum(1 for frames in self._id_frames.values() if frames >= 4)
 
     def status_line(self) -> str:
         """A compact line for the overlay panel."""

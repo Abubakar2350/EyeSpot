@@ -215,6 +215,27 @@ frame. Events are flushed immediately rather than buffered, so nothing is lost
 if the process is killed. A cooldown stops one crash from producing dozens of
 events.
 
+### Detection confidence matters more than any other setting
+
+`--accident` lowers the detection confidence to **0.35** automatically, and this
+turns out to be the single setting that decides whether the feature works.
+
+Everything here is derived from how an object moves *between* frames, which
+requires it to keep the same track ID. At the usual 0.5 threshold, vehicles in
+ordinary CCTV footage are detected right at the edge — around 0.5 confidence —
+so they flicker in and out, the tracker issues a fresh ID each time, and the
+motion history resets exactly when a collision makes them hardest to see.
+
+Measured on real CCTV accident footage (640×360, 2298 frames, 76 seconds):
+
+| Detection confidence | Events found |
+|---|---|
+| 0.50 | **0** — the fused score cleared the threshold on 2 isolated frames and never held |
+| 0.35 | 5, including the collision two seconds into the clip |
+
+Pass `--conf` yourself to override it. In the web UI the same adjustment is made
+when the toggle is switched on, and it says so in the sidebar.
+
 ### Tuning
 
 ```bash
@@ -223,6 +244,28 @@ python main.py --source clip.mp4 --accident --accident-threshold 0.70   # quiete
 ```
 
 Every threshold and weight lives in the accident section of `config.py`.
+
+### Accuracy, honestly
+
+On the 76-second compilation above it raised 5 events. Reviewing the saved
+snapshots by eye:
+
+| Verdict | Count |
+|---|---|
+| Clearly a real collision | 2 |
+| Plausible, hard to call from one frame | 2 |
+| Clearly ordinary traffic | 1 |
+
+So it finds real accidents and it also cries wolf. The most common false
+positive is **perspective**: on a dashcam, a nearby vehicle passing in front of
+distant pedestrians produces overlapping boxes that appear to be closing, which
+is indistinguishable from a collision in a flat 2D image. Depth would resolve
+it; a single camera does not provide depth.
+
+Treat the output as *frames worth a human's attention*, not as a verdict. That
+is a useful thing on 76 seconds of footage and considerably more useful on eight
+hours of it — but it is not the same as a trained classifier, and no accuracy
+figure against a labelled benchmark is claimed.
 
 ### What this is, and what it is not
 
