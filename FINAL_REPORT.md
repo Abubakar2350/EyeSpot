@@ -313,6 +313,32 @@ tolerates false alarms far better than a live alert does.
 The one clip missed at every setting is a night-time junction filmed wide, with
 vehicles a few pixels across — a detection limit, not a scoring one.
 
+A further report — that some real accidents were missed, that a car merely
+passing by was called a crash, and that a crashed vehicle should stay marked —
+led to the most useful change of all: **post-event confirmation**.
+
+The kinematics of a collision and a near miss are nearly identical at the moment
+they occur. What separates them is what happens next: a vehicle that has crashed
+stops and stays stopped, while one that passed close by drives on. So a
+candidate is now held for 2.5 seconds, the vehicles are watched, and it is
+confirmed only if at least one is still sitting there.
+
+| Configuration | Clips found (of 6) | Extra events |
+|---|---|---|
+| Threshold 0.55, no confirmation | 3 | +2 |
+| Threshold 0.50, no confirmation | 5 | +3 |
+| **Threshold 0.50, with confirmation** | **5** | **+1** |
+
+The same accidents, with a third of the false alarms — and no recall lost, since
+a genuine crash leaves its vehicles stationary by definition.
+
+Confirmation also answered the third request directly. The vehicles that came to
+rest are marked `ACCIDENTED #id` in red with corner brackets and stay marked for
+the rest of the run, so the crashed car remains identifiable long after the
+banner fades. Only vehicles that actually stopped are marked — a candidate
+sweeps in everything nearby, but the ones still sitting there are the ones that
+took part.
+
 Reviewing saved snapshots by eye: real collisions are found, and the
 characteristic false positive is perspective. The characteristic false positive is perspective — on a dashcam, a
 nearby vehicle passing in front of distant pedestrians yields overlapping boxes

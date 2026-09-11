@@ -176,6 +176,20 @@ ACCIDENT_SENSITIVITY = {
     "high":      (0.42, 2),   # catches more, expect roughly twice the false alarms
 }
 
+# Post-event confirmation.
+#
+# A candidate is not announced immediately. The vehicles involved are watched
+# for a few seconds first, because that is what separates a crash from a near
+# miss: a vehicle that has actually collided stays where it is, while one that
+# merely passed close by drives on. Waiting is what makes the difference
+# observable, and it is also what allows a confirmed vehicle to be marked and
+# followed afterwards.
+ACCIDENT_CONFIRM_SECONDS = 2.5
+
+# A vehicle moving slower than this during the confirmation window counts as
+# stopped (object lengths per second).
+ACCIDENT_CONFIRM_MAX_SPEED = 0.4
+
 # Seconds to stay silent after an event. One crash produces many chaotic
 # frames; without this a single accident would raise dozens of events.
 ACCIDENT_COOLDOWN = 5.0

@@ -438,9 +438,11 @@ def test_accident_detection() -> str:
         return Detection(2, "car", 0.9, _box(cx, cy, w, h), track_id=tid)
 
     # --- collision: two vehicles close head-on, then stop dead ---
+    # Long enough to outlast the confirmation window: a candidate is only
+    # accepted after the vehicles have been seen staying put.
     frames = []
     ax, bx = 200.0, 800.0
-    for _ in range(60):
+    for _ in range(180):
         if ax < bx - 70:
             ax += 9.0
             bx -= 9.0
@@ -454,7 +456,7 @@ def test_accident_detection() -> str:
     # --- ordinary traffic: parallel, steady, well separated ---
     calm = [
         [car(1, 100 + i * 8, 300), car(2, 150 + i * 8, 450)]
-        for i in range(80)
+        for i in range(180)
     ]
     _, quiet = _accident_scene(calm)
     assert not quiet, "steady parallel traffic must not raise an event"
@@ -462,7 +464,7 @@ def test_accident_detection() -> str:
     # --- one hard brake alone must not be enough ---
     frames = []
     x, v = 100.0, 14.0
-    for i in range(70):
+    for i in range(180):
         if i > 30:
             v = max(0.0, v - 2.5)
         x += v
@@ -471,6 +473,45 @@ def test_accident_detection() -> str:
     assert not braking, "a single channel must never reach the threshold alone"
 
     return f"collision fires ({crash.score:.2f}), traffic and braking stay silent"
+
+
+def test_accident_confirmation() -> str:
+    """A crash confirms and marks the vehicles; a near miss is discarded."""
+    from detector.detect import Detection
+
+    def car(tid, cx, cy=300):
+        return Detection(2, "car", 0.9, _box(cx, cy, 80, 60), track_id=tid)
+
+    # Two vehicles close head-on, collide, and stay where they stopped
+    crash = []
+    ax, bx = 200.0, 800.0
+    for _ in range(220):
+        if ax < bx - 70:
+            ax += 9.0
+            bx -= 9.0
+        crash.append([car(1, ax), car(2, bx)])
+    detector, events = _accident_scene(crash)
+    assert events, "a collision whose vehicles stop should confirm"
+    assert detector.accidented, "the vehicles involved should be marked"
+    assert events[0].confirmed_after > 0, "confirmation time should be recorded"
+
+    # The same approach, but neither vehicle stops — they pass through. The
+    # kinematics look similar; what differs is what happens afterwards.
+    near_miss = []
+    ax, bx = 200.0, 800.0
+    for _ in range(220):
+        ax += 9.0
+        bx -= 9.0
+        near_miss.append([car(1, ax), car(2, bx)])
+    passer, passed = _accident_scene(near_miss)
+    assert not passed, f"vehicles that drive on must not confirm, got {len(passed)}"
+    assert not passer.accidented, "nothing should be marked after a near miss"
+
+    # Only vehicles that actually came to rest are marked, not everything nearby
+    marked = set(detector.accidented)
+    assert marked <= {1, 2}, f"marked vehicles outside the collision: {marked}"
+
+    return f"crash confirms after {events[0].confirmed_after:.1f}s; near miss discarded"
 
 
 def test_accident_cooldown() -> str:
@@ -613,6 +654,7 @@ TESTS = [
     ("Object tracking (persistent IDs)", test_tracking),
     ("Accident kinematics (speed, TTC)", test_accident_kinematics),
     ("Accident detection (fusion)", test_accident_detection),
+    ("Accident confirmation", test_accident_confirmation),
     ("Accident cooldown", test_accident_cooldown),
     ("Accident event logging", test_accident_logger),
     ("Target lock", test_target_lock),

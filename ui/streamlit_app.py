@@ -447,7 +447,7 @@ def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = 
                 event = accidents.update(detections, fps_counter.frame_count, now=stamp)
                 if event is not None:
                     accident_logger.log(event, frame)
-                accidents.draw(frame, now=stamp)
+                accidents.draw(frame, now=stamp, detections=detections)
 
             for label, count in counts.items():
                 frames_seen[label] = frames_seen.get(label, 0) + count
@@ -695,7 +695,7 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
                 if accidents is not None:
                     counter["frame"] += 1
                     accidents.update(detections, counter["frame"])
-                    accidents.draw(img)
+                    accidents.draw(img, detections=detections)
             except Exception:
                 # A failed frame should show as unannotated video, not kill
                 # the stream.
@@ -891,7 +891,7 @@ def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False, se
                         f"🚨 **Accident detected** at frame {event.frame} — "
                         f"score {event.score:.2f} · {event.summary}"
                     )
-                accidents.draw(frame)
+                accidents.draw(frame, detections=detections)
 
             frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
             stats_slot.metric("FPS", f"{fps_counter.value:.1f}", f"{len(detections)} objects")

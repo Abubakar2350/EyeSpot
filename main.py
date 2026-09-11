@@ -515,12 +515,16 @@ def run_stream(detector: Detector, source: int | str, kind: str, args: argparse.
                         # over it, so the saved image shows the scene clearly.
                         snapshot = accident_logger.log(event, frame)
                         print(
-                            f"\n  ⚠ ACCIDENT  frame {event.frame}  score {event.score:.2f}"
-                            f"  [{event.summary}]"
+                            f"\n  ⚠ ACCIDENT CONFIRMED  frame {event.frame}  "
+                            f"score {event.score:.2f}  [{event.summary}]"
+                        )
+                        print(
+                            f"    vehicles stayed put for {event.confirmed_after:.1f}s "
+                            f"— now marked: {', '.join('#' + str(t) for t in event.track_ids)}"
                         )
                         if snapshot:
                             print(f"    snapshot: {snapshot}")
-                    accidents.draw(frame, now=stamp)
+                    accidents.draw(frame, now=stamp, detections=detections)
 
                 if det_logger is not None:
                     det_logger.log(fps_counter.frame_count, detections)

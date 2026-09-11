@@ -192,6 +192,36 @@ a millisecond per frame — within noise of running tracking alone.
 | `swerve` | Heading changing faster than steering can explain |
 | `ttc` | Time-to-collision for a converging pair dropping below a threshold |
 
+### Confirmation — the step that separates a crash from a near miss
+
+A candidate is **not announced immediately**. The vehicles involved are watched
+for a few seconds first.
+
+The reason is that the kinematics of a collision and a near miss look almost
+identical at the moment they happen: boxes overlap, something brakes hard,
+a heading snaps round. What separates them is what comes *next*. A vehicle that
+has actually crashed stops and stays stopped. A vehicle that merely passed close
+by drives on.
+
+So EyeSpot waits, then decides:
+
+| Afterwards | Verdict |
+|---|---|
+| At least one vehicle is still sitting there | **Confirmed** — announced, logged, and marked |
+| Everyone drove on | Discarded as a near miss, silently |
+
+Measured on the CCTV compilation below, this cut false positives from 3 to 1
+while finding exactly the same accidents.
+
+Once confirmed, the vehicles that came to rest are **locked and labelled
+`ACCIDENTED #id`** in red with corner brackets, and they stay marked for the
+rest of the run — so you can still see which car it was long after the banner
+has faded. Only vehicles that actually stopped are marked, not everything that
+happened to be nearby.
+
+While a candidate is under review the overlay shows `checking... 1.4/2.5s`,
+rather than staying silent and looking broken.
+
 **No single signal fires an event.** Each one alone has an innocent explanation:
 a car braking at a light, a pedestrian crouching, two vehicles overlapping only
 because one is behind the other. The weights in `config.py` are set so that no
@@ -256,14 +286,14 @@ preset outright.
 Evaluated on a 76-second CCTV crash compilation. Scene-cut detection splits it
 into **six distinguishable accident clips**, which serve as rough ground truth:
 
-| Sensitivity | Threshold | Persistence | Clips found | Extra events |
-|---|---|---|---|---|
-| low | 0.60 | 3 of 8 | 3 of 6 | +1 |
-| **medium** | **0.50** | **2 of 8** | **5 of 6** | **+3** |
-| high | 0.42 | 2 of 8 | 5 of 6 | +5 |
+| Setting | Clips found | Extra events |
+|---|---|---|
+| Before confirmation, threshold 0.55 | 3 of 6 | +2 |
+| Before confirmation, threshold 0.50 | 5 of 6 | +3 |
+| **With confirmation, threshold 0.50** | **5 of 6** | **+1** |
 
-Below 0.50 the extra events pile up without finding anything new, which is why
-medium is the default.
+Confirmation is what made the difference: the same accidents found, with a third
+of the false alarms.
 
 **The one clip never caught at any setting** is a night-time junction filmed
 wide, where the vehicles are a few pixels across. Neither detection nor tracking

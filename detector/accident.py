@@ -252,8 +252,17 @@ class TrackState:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class AccidentEvent:
-    """One triggered accident, with the evidence that produced it."""
+class PendingEvent:
+    """
+    A candidate awaiting confirmation.
+
+    The kinematics that raise a candidate — boxes overlapping, a jolt, a sharp
+    change of heading — look much the same whether two vehicles collided or one
+    merely swerved past the other. What separates them is what happens next: a
+    vehicle that has actually crashed stops and stays stopped, while a vehicle
+    that passed close by drives on. So a candidate is held, the vehicles are
+    watched, and only then is it accepted or discarded.
+    """
 
     frame: int
     timestamp: datetime
@@ -262,6 +271,22 @@ class AccidentEvent:
     track_ids: list[int]
     labels: list[str]
     box: tuple[int, int, int, int]
+    raised_at: float
+
+
+@dataclass
+class AccidentEvent:
+    """One confirmed accident, with the evidence that produced it."""
+
+    frame: int
+    timestamp: datetime
+    score: float
+    signals: dict[str, float]
+    track_ids: list[int]
+    labels: list[str]
+    box: tuple[int, int, int, int]
+    # Seconds the involved vehicles stayed put before this was accepted
+    confirmed_after: float = 0.0
 
     @property
     def summary(self) -> str:
@@ -302,6 +327,12 @@ class AccidentDetector:
 
         self.tracks: dict[int, TrackState] = {}
         self.events: list[AccidentEvent] = []
+        # A candidate waiting to be accepted or discarded
+        self.pending: PendingEvent | None = None
+        # Track IDs confirmed as having crashed. These stay marked for the rest
+        # of the run, which is the point: after a crash you want to keep seeing
+        # which vehicle it was, not lose it once the banner fades.
+        self.accidented: dict[int, dict] = {}
 
         # Recent above-threshold history, for the sliding-window persistence
         # check. A strictly consecutive run proved too brittle: marginal
@@ -376,20 +407,85 @@ class AccidentDetector:
         self._recent_hits.append(score >= self.threshold)
         self._above_threshold = sum(self._recent_hits)
 
+        # A candidate already under review takes precedence over raising another
+        confirmed = self._review_pending(now, frame_index)
+        if confirmed is not None:
+            return confirmed
+
         if self._above_threshold < self.persistence:
             return None
 
         # Cooldown: one crash produces many frames of chaos. Without this, a
-        # single accident would raise dozens of events.
+        # single accident would raise dozens of candidates.
         if now - self._last_event_time < self.cooldown:
             return None
 
-        event = self._build_event(frame_index, score, signals, involved)
+        if self.pending is None:
+            self.pending = self._build_pending(frame_index, score, signals, involved, now)
+            self._recent_hits.clear()
+            self._above_threshold = 0
+        return None
+
+    def _review_pending(self, now: float, frame_index: int) -> AccidentEvent | None:
+        """
+        Decide the fate of a candidate once its confirmation window has elapsed.
+
+        Accepted when at least one involved vehicle is still sitting where it
+        ended up — either measurably stopped, or gone from view while stopped,
+        which is what happens when a wrecked car is occluded or the shot cuts.
+        Discarded when every vehicle simply drove on, because that is a near
+        miss rather than a collision.
+        """
+        if self.pending is None:
+            return None
+
+        waited = now - self.pending.raised_at
+        if waited < config.ACCIDENT_CONFIRM_SECONDS:
+            return None
+
+        # Which of the implicated vehicles actually came to rest. A candidate
+        # sweeps in everything nearby — a converging pair, anything that braked —
+        # but only the ones still sitting there took part in the collision.
+        stopped = []
+        for track_id in self.pending.track_ids:
+            state = self.tracks.get(track_id)
+            if state is None:
+                # Gone from view during the window, so there is nothing to
+                # measure. Not counted either way: the pruning horizon is longer
+                # than the confirmation window, so a vehicle that is still in
+                # shot will still be here.
+                continue
+            if state.speed() <= config.ACCIDENT_CONFIRM_MAX_SPEED:
+                stopped.append(track_id)
+
+        pending, self.pending = self.pending, None
+
+        if not stopped:
+            # Everyone drove on: a near miss, not a crash.
+            return None
+
+        event = AccidentEvent(
+            frame=pending.frame,
+            timestamp=pending.timestamp,
+            score=pending.score,
+            signals=pending.signals,
+            track_ids=stopped,
+            labels=sorted({
+                self.tracks[t].label for t in stopped if t in self.tracks
+            }) or pending.labels,
+            box=pending.box,
+            confirmed_after=waited,
+        )
         self._last_event_time = now
-        self._recent_hits.clear()
-        self._above_threshold = 0
         self._banner_until = now + 3.0
         self.events.append(event)
+
+        for track_id in stopped:
+            self.accidented[track_id] = {
+                "frame": pending.frame,
+                "score": pending.score,
+                "label": (self.tracks[track_id].label if track_id in self.tracks else "vehicle"),
+            }
         return event
 
     # -- signal channels ----------------------------------------------------
@@ -536,6 +632,26 @@ class AccidentDetector:
             del self.tracks[tid]
             self._person_down_since.pop(tid, None)
 
+    def _build_pending(
+        self,
+        frame_index: int,
+        score: float,
+        signals: dict[str, float],
+        involved: list[Detection],
+        now: float,
+    ) -> PendingEvent:
+        base = self._build_event(frame_index, score, signals, involved)
+        return PendingEvent(
+            frame=base.frame,
+            timestamp=base.timestamp,
+            score=base.score,
+            signals=base.signals,
+            track_ids=base.track_ids,
+            labels=base.labels,
+            box=base.box,
+            raised_at=now,
+        )
+
     def _build_event(
         self,
         frame_index: int,
@@ -597,15 +713,34 @@ class AccidentDetector:
         """How many tracks ever accumulated enough history to be measured."""
         return sum(1 for frames in self._id_frames.values() if frames >= 4)
 
+    def _draw_corner_brackets(self, frame, x1, y1, x2, y2) -> None:
+        _draw_corner_brackets_impl(frame, x1, y1, x2, y2, _ALERT)
+
     def status_line(self) -> str:
         """A compact line for the overlay panel."""
+        if self.pending is not None:
+            return f"Accident risk: {self._last_score:.2f}  (confirming...)"
         if self.events:
-            return f"Accident risk: {self._last_score:.2f}  ({len(self.events)} event(s))"
+            return (
+                f"Accident risk: {self._last_score:.2f}  "
+                f"({len(self.events)} confirmed, {len(self.accidented)} vehicle(s) marked)"
+            )
         return f"Accident risk: {self._last_score:.2f}"
 
-    def draw(self, frame: np.ndarray, now: float | None = None) -> np.ndarray:
+    def draw(
+        self,
+        frame: np.ndarray,
+        now: float | None = None,
+        detections: list[Detection] | None = None,
+    ) -> np.ndarray:
         """
-        Draw the risk meter, and a banner over the scene while an event is fresh.
+        Draw the risk meter, any fresh event banner, and a persistent marker on
+        every vehicle confirmed to have crashed.
+
+        Passing `detections` is what enables the marker to follow the vehicle:
+        the confirmed track IDs are matched against this frame's boxes, so the
+        label stays on the car as it sits there, rather than being a rectangle
+        frozen where the impact happened.
         """
         if now is None:
             import time
@@ -613,6 +748,27 @@ class AccidentDetector:
             now = time.perf_counter()
 
         h, w = frame.shape[:2]
+
+        # Persistent "ACCIDENTED" marker on the vehicles involved
+        if detections and self.accidented:
+            for det in detections:
+                if det.track_id not in self.accidented:
+                    continue
+                x1, y1, x2, y2 = det.box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), _ALERT, 3)
+                self._draw_corner_brackets(frame, x1, y1, x2, y2)
+
+                text = f"ACCIDENTED #{det.track_id}"
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                (tw, th), baseline = cv2.getTextSize(text, font, 0.5, 2)
+                top = y1 - th - baseline - 6
+                if top < 0:
+                    top = y2 + 4
+                cv2.rectangle(frame, (x1, top), (x1 + tw + 10, top + th + baseline + 6), _ALERT, -1)
+                cv2.putText(
+                    frame, text, (x1 + 5, top + th + 2),
+                    font, 0.5, _TEXT, 2, cv2.LINE_AA,
+                )
 
         # Risk meter, bottom-right, always visible while enabled
         meter_w, meter_h = 160, 10
@@ -626,6 +782,15 @@ class AccidentDetector:
             frame, f"RISK {self._last_score:.2f}", (x, y - 6),
             cv2.FONT_HERSHEY_SIMPLEX, 0.45, _TEXT, 1, cv2.LINE_AA,
         )
+
+        # A candidate under review — say so rather than staying silent
+        if self.pending is not None:
+            waited = now - self.pending.raised_at
+            cv2.putText(
+                frame,
+                f"checking... {waited:.1f}/{config.ACCIDENT_CONFIRM_SECONDS:.1f}s",
+                (x, y - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (60, 180, 255), 1, cv2.LINE_AA,
+            )
 
         if now > self._banner_until or not self.events:
             return frame
@@ -653,6 +818,17 @@ class AccidentDetector:
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
+
+def _draw_corner_brackets_impl(frame, x1, y1, x2, y2, colour, thickness=3):
+    """L-shaped brackets at the four corners of a box."""
+    arm = max(10, min(x2 - x1, y2 - y1) // 5)
+    for (px, py), (dx, dy) in (
+        ((x1, y1), (1, 1)), ((x2, y1), (-1, 1)),
+        ((x1, y2), (1, -1)), ((x2, y2), (-1, -1)),
+    ):
+        cv2.line(frame, (px, py), (px + arm * dx, py), colour, thickness)
+        cv2.line(frame, (px, py), (px, py + arm * dy), colour, thickness)
+
 
 def _ramp(value: float, low: float, high: float) -> float:
     """Map `value` onto 0..1 across the range low..high, clamped at both ends."""
