@@ -289,7 +289,7 @@ def show_counts(counts: dict[str, int], placeholder) -> None:
         return
     placeholder.dataframe(
         {"Object": list(counts.keys()), "Count": list(counts.values())},
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
     )
 
@@ -318,7 +318,7 @@ def tab_image(detector: Detector) -> None:
 
     left, right = st.columns([3, 1])
     with left:
-        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
+        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
     with right:
         st.metric("Objects", len(detections))
         st.metric("Inference", f"{elapsed * 1000:.0f} ms")
@@ -370,7 +370,7 @@ def show_video_result(result: dict) -> None:
                     "Involved": [", ".join(a["labels"]) or "—" for a in accidents],
                     "Evidence": [a["evidence"] for a in accidents],
                 },
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
             )
             st.caption(
@@ -390,7 +390,7 @@ def show_video_result(result: dict) -> None:
                 "Max in one frame": [row["max_in_frame"] for row in summary],
                 "Unique objects": [row["unique"] for row in summary],
             },
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
         if not result["tracking"]:
@@ -414,7 +414,7 @@ def show_video_result(result: dict) -> None:
                 download_path.read_bytes(),
                 file_name=download_path.name,
                 mime="video/mp4",
-                width="stretch",
+                use_container_width=True,
             )
     with col2:
         csv_path = Path(result["csv"])
@@ -424,7 +424,7 @@ def show_video_result(result: dict) -> None:
                 csv_path.read_bytes(),
                 file_name=csv_path.name,
                 mime="text/csv",
-                width="stretch",
+                use_container_width=True,
             )
 
     accident_csv = result.get("accident_csv")
@@ -537,7 +537,7 @@ def tab_video(detector: Detector, tracking: bool = False, accident_mode: bool = 
                 )
             writer.write(frame)
 
-            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
+            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
             stats_slot.metric("FPS", f"{fps_counter.value:.1f}", f"{len(detections)} objects")
             show_counts(counts, counts_slot)
 
@@ -822,7 +822,7 @@ def device_camera_section(detector: Detector, tracking: bool = False, accident_m
 
     left, right = st.columns([3, 1])
     with left:
-        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
+        st.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
     with right:
         st.metric("Objects", len(detections))
         st.metric("Inference", f"{elapsed * 1000:.0f} ms")
@@ -963,7 +963,7 @@ def tab_live(detector: Detector, tracking: bool, accident_mode: bool = False, se
                     )
                 accidents.draw(frame, detections=detections)
 
-            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), width="stretch")
+            frame_slot.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_container_width=True)
             stats_slot.metric("FPS", f"{fps_counter.value:.1f}", f"{len(detections)} objects")
             show_counts(counts, counts_slot)
     finally:
